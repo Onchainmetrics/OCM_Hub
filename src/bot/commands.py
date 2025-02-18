@@ -34,88 +34,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
 Available commands:
 /help - Show this help message
-/holders <contract_address> - Get holder analysis for a specific token
-/several - Get tokens held by multiple top wallets
 /whales <contract_address> - Get detailed whale analysis and behavior patterns
 /testalpha - Test alpha tracker functionality
 """
     await update.message.reply_text(help_text)
-
-async def several_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /several command - Get tokens held by several top wallets"""
-    try:
-        await update.message.reply_text("🔍 Fetching tokens held by several top wallets...\nPlease wait...")
-        
-        dune = DuneAnalytics()
-        df = await dune.get_several_top_wallets()
-        
-        if df.empty:
-            await update.message.reply_text("No results found.")
-            return
-        
-        # Format the results into a nice message
-        message = "🏆 Tokens held by several top wallets:\n\n"
-        
-        for _, row in df.iterrows():
-            # Format each row with a copyable contract address
-            message += (
-                f"<code>{row['token_mint_address']}</code>\n"
-                f"${row['symbol']} | {row['num_top_traders']} traders | "
-                f"{row['trader_types']} | "
-                f"Min: {row['min_percentage']}% | Max: {row['max_percentage']}%\n\n"
-            )
-        
-        await update.message.reply_text(
-            message,
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in several command: {e}")
-        await update.message.reply_text("❌ Error occurred while fetching data. Please try again later.")
-
-async def holders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /holders command - Analyze holder distribution by trader category"""
-    if not context.args:
-        await update.message.reply_text("Please provide a contract address.\nUsage: /holders <contract_address>")
-        return
-    
-    contract_address = context.args[0]
-    try:
-        await update.message.reply_text(f"📊 Analyzing holders for: <code>{contract_address}</code>...\nPlease wait...", parse_mode='HTML')
-        
-        dune = DuneAnalytics()
-        df = await dune.get_holder_analysis(contract_address)
-        
-        if df.empty:
-            await update.message.reply_text("No top traders found holding this token.")
-            return
-        
-        # Format the results into a nice message
-        message = f"📊 Holder Analysis for <code>{contract_address}</code>\n\n"
-        message += "Top PnL Traders Breakdown:\n"
-        
-        total_holders = df['holders_count'].sum()
-        
-        for _, row in df.iterrows():
-            percentage = (row['holders_count'] / total_holders) * 100
-            message += (
-                f"• {row['trader_category']}: {row['holders_count']} holders "
-                f"({percentage:.1f}%)\n"
-            )
-        
-        message += f"\nTotal Top Traders: {total_holders}"
-        
-        await update.message.reply_text(
-            message,
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in holders command: {e}")
-        await update.message.reply_text("❌ Error occurred while analyzing holders. Please try again later.")
 
 def command_handler(func):
     """Wrapper to handle message sending for cached commands"""
@@ -356,23 +278,20 @@ async def format_heatmap(df: pd.DataFrame) -> str:
 welcome_message = (
     "🔍 Welcome to CA Scanner Bot!\n\n"
     "Available commands:\n"
-    "/several - Get tokens held by multiple top wallets\n"
-    "/holders <contract_address> - Analyze holder distribution\n"
     "/whales <contract_address> - Get whale analysis\n"
     "/heatmap - View live alpha wallet activity\n"
-    "/help - Show this help message"
+    "/help - Show this help message\n"
+    "/testalpha - Test alpha tracker functionality"
 )
 
 help_text = (
     "🤖 CA Scanner Bot Commands:\n\n"
-    "/several\n"
-    "- Get list of tokens held by multiple top wallets\n\n"
-    "/holders <contract_address>\n"
-    "- Analyze holder distribution and concentration\n\n"
     "/whales <contract_address>\n"
-    "- Get whale analysis\n\n"
+    "- Get detailed whale analysis for a token\n\n"
     "/heatmap\n"
     "- View live alpha wallet activity\n\n"
+    "/testalpha\n"
+    "- Test alpha tracker functionality\n\n"
     "/help\n"
     "- Show this help message"
 )

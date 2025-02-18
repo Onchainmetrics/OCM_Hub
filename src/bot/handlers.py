@@ -2,9 +2,7 @@ from telegram.ext import Application, CommandHandler
 from src.config.config import TELEGRAM_TOKEN
 from src.bot.commands import (
     start_command, 
-    help_command, 
-    holders_command, 
-    several_command, 
+    help_command,  
     whales_command,
     test_alpha_command,
     heatmap_command
@@ -37,8 +35,6 @@ def register_handlers(application):
     """Register all command handlers"""
     application.add_handler(CommandHandler('start', start_command))
     application.add_handler(CommandHandler('help', help_command))
-    application.add_handler(CommandHandler('holders', holders_command))
-    application.add_handler(CommandHandler('several', several_command))
     application.add_handler(CommandHandler('whales', whales_command))
     application.add_handler(CommandHandler('testalpha', test_alpha_command))
     application.add_handler(CommandHandler('heatmap', heatmap_command)) 

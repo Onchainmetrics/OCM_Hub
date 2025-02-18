@@ -16,56 +16,6 @@ class DuneAnalytics:
     def __init__(self):
         self.client = DuneClient.from_env()
         
-    async def get_several_top_wallets(self) -> pd.DataFrame:
-        """Execute query for tokens held by several top wallets"""
-        try:
-            # Create query object
-            query = QueryBase(
-                name="Several Top Wallets",
-                query_id=4660685
-            )
-            
-            # Execute query
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None, 
-                lambda: self.client.run_query(
-                    query=query,
-                    performance='large'  # or 'large' for faster execution
-                )
-            )
-            return pd.DataFrame(results.result.rows)
-        except Exception as e:
-            logger.error(f"Error executing Dune query: {e}")
-            raise
-
-    async def get_holder_analysis(self, contract_address: str) -> pd.DataFrame:
-        """Execute query for holder analysis of a specific token"""
-        try:
-            query = QueryBase(
-                name="Holder Analysis",
-                query_id=4658905,
-                params=[
-                    QueryParameter.text_type(
-                        name="CA",
-                        value=contract_address
-                    )
-                ]
-            )
-            
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None,
-                lambda: self.client.run_query(  
-                    query=query,
-                    performance="medium"
-                )
-            )
-            return pd.DataFrame(results.result.rows)
-        except Exception as e:
-            logger.error(f"Error executing holder analysis query: {e}")
-            raise
-
     async def get_whale_analysis(self, contract_address: str) -> pd.DataFrame:
         """Execute query for whale analysis of a specific token"""
         try:
