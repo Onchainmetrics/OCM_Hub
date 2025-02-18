@@ -1,0 +1,7 @@
+{
+    "include": ["src"],
+    "venvPath": ".",
+    "pythonPath": "python_env/bin/python",
+    "extraPaths": ["src"],
+    "reportMissingImports": "warning"
+} 
