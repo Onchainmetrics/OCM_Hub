@@ -18,12 +18,11 @@ class TelegramBot:
         
         # Set up commands with descriptions
         commands = [
-            BotCommand("start", "Start the bot and see available commands"),
-            BotCommand("heatmap", "Track alpha wallet flows (🟢 inflow / 🔴 outflow in $)"),
-            BotCommand("several", "Get tokens held by multiple top wallets"),
-            BotCommand("holders", "Analyze holder distribution for a token"),
+            BotCommand("start", "Start the bot"),
+            BotCommand("help", "Show help message"),
             BotCommand("whales", "Get whale analysis for a token"),
-            BotCommand("help", "Show help message with all commands")
+            BotCommand("heatmap", "Track alpha wallet flows"),
+            BotCommand("testalpha", "Test alpha tracker functionality")
         ]
         
         # Register command handlers
