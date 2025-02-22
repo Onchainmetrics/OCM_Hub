@@ -9,6 +9,9 @@ import asyncio
 import aiohttp
 from datetime import datetime, timedelta
 from collections import defaultdict
+import grpc
+from yellowstone_grpc_proto.geyser.geyser_pb2 import SubscribeRequest, SubscribeRequestFilterTransactions
+from yellowstone_grpc_proto.geyser.geyser_pb2_grpc import GeyserStub
 
 # Load environment variables
 load_dotenv()
@@ -74,71 +77,89 @@ async def get_token_activity(token_address: str) -> dict:
     """Get comprehensive token activity from Helius"""
     helius_key = os.getenv('HELIUS_API_KEY')
     
-    # Updated endpoint and payload for Helius v0
-    url = f"https://api.helius.xyz/v0/addresses/{token_address}/transactions"
+    # Use the parsed transaction history endpoint
+    url = f"https://api.helius.xyz/v0/token-history"
     params = {
         "api-key": helius_key,
-        "until": "now",
-        "type": ["SWAP"]  # Filter for swap transactions
+        "tokenAddress": token_address,
+        "type": "ALL",  # Get all transaction types
+        "limit": 100
     }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params) as response:
-            if response.status != 200:
-                logger.error(f"Helius API error: {await response.text()}")
-                return None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params) as response:
+                if response.status != 200:
+                    logger.error(f"Helius API error: {await response.text()}")
+                    return None
+                    
+                transactions = await response.json()
                 
-            transactions = await response.json()
-            
-            # Process transactions
-            buyers = defaultdict(lambda: {
-                'first_buy_time': None,
-                'total_bought': 0,
-                'total_sold': 0,
-                'buy_count': 0,
-                'sell_count': 0
-            })
-            
-            # Track timestamps for time-based analysis
-            first_tx_time = None
-            recent_trades = []
-            
-            for tx in transactions:
-                # Parse Helius transaction format
-                timestamp = datetime.fromtimestamp(tx['timestamp'])
-                wallet = tx['sourceAddress']  # or tx['accountData']['account'] depending on response
+                # Track transaction data
+                buyers = defaultdict(lambda: {
+                    'first_buy_time': None,
+                    'total_bought': 0,
+                    'total_sold': 0,
+                    'buy_count': 0,
+                    'sell_count': 0
+                })
+                recent_trades = []
+                first_tx_time = None
                 
-                # Determine if buy or sell based on Helius tx data
-                is_buy = any(
-                    instruction['type'] == 'SWAP' and 
-                    instruction['data'].get('tokenInSymbol') == 'SOL'
-                    for instruction in tx.get('instructions', [])
-                )
+                for tx in transactions:
+                    try:
+                        timestamp = datetime.fromtimestamp(tx['timestamp'] / 1000)  # Convert milliseconds to seconds
+                        wallet = tx['sourceAddress']  # Changed from 'address' to 'sourceAddress'
+                        
+                        # Determine if buy/sell and amount from transaction data
+                        is_buy = False
+                        amount = 0
+                        
+                        # Look for swap instructions
+                        for ix in tx.get('instructions', []):
+                            if ix.get('programId') in [
+                                "SwaPpA9LAaLfeLi3a68M4DjnLqgtticKg6CnyNwgAC8",  # Raydium
+                                "srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX",  # Openbook
+                                # Add other DEX program IDs as needed
+                            ]:
+                                # Extract swap details from instruction data
+                                swap_data = ix.get('data', {})
+                                is_buy = True  # Simplified for now, need proper analysis
+                                amount = float(swap_data.get('amount', 0))
+                                break
+                        
+                        if not first_tx_time:
+                            first_tx_time = timestamp
+                        
+                        # Update stats
+                        if is_buy:
+                            if not buyers[wallet]['first_buy_time']:
+                                buyers[wallet]['first_buy_time'] = timestamp
+                            buyers[wallet]['total_bought'] += amount
+                            buyers[wallet]['buy_count'] += 1
+                        else:
+                            buyers[wallet]['total_sold'] += amount
+                            buyers[wallet]['sell_count'] += 1
+                        
+                        # Track recent activity (last 4h)
+                        if (datetime.now() - timestamp).total_seconds() < 14400:
+                            recent_trades.append({
+                                'timestamp': timestamp,
+                                'wallet': wallet,
+                                'is_buy': is_buy,
+                                'amount': amount
+                            })
+                            
+                    except KeyError as e:
+                        logger.warning(f"Missing key in transaction data: {e}")
+                        continue
                 
-                if not first_tx_time:
-                    first_tx_time = timestamp
+                return {
+                    'buyers': buyers,
+                    'recent_trades': recent_trades,
+                    'token_age': datetime.now() - first_tx_time if first_tx_time else None
+                }
                 
-                # Update buyer stats
-                if is_buy:
-                    if not buyers[wallet]['first_buy_time']:
-                        buyers[wallet]['first_buy_time'] = timestamp
-                    buyers[wallet]['total_bought'] += float(tx['amount'])
-                    buyers[wallet]['buy_count'] += 1
-                else:
-                    buyers[wallet]['total_sold'] += float(tx['amount'])
-                    buyers[wallet]['sell_count'] += 1
-                
-                # Track recent activity (last 4h)
-                if (datetime.now() - timestamp).total_seconds() < 14400:  # 4 hours
-                    recent_trades.append({
-                        'timestamp': timestamp,
-                        'wallet': wallet,
-                        'is_buy': is_buy,
-                        'amount': float(tx['amount'])
-                    })
-            
-            return {
-                'buyers': buyers,
-                'recent_trades': recent_trades,
-                'token_age': datetime.now() - first_tx_time if first_tx_time else None
-            } 
+    except Exception as e:
+        logger.error(f"Error processing token activity: {e}")
+        return None 

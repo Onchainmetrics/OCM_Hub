@@ -5,11 +5,14 @@ from src.dune.client import DuneAnalytics, get_token_activity
 import logging
 import pandas as pd
 from telegram.ext import Application, CommandHandler
-from src.services.cache_service import cache_command
+from src.services.cache_service import CacheService, cache_command
 from functools import wraps
 import time
 
 logger = logging.getLogger(__name__)
+
+# Initialize cache service
+cache = CacheService()
 
 async def check_auth(update: Update) -> bool:
     """Check if user is authorized to use the bot"""
@@ -297,6 +300,11 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return "❌ No activity found for this token."
             
         message = format_scan_message(token_data)
+        
+        # Only cache successful results
+        if not message.startswith("❌"):
+            await cache.set(f"scan_command:{contract_address}", message, expire_minutes=15)
+            
         return message
         
     except Exception as e:
