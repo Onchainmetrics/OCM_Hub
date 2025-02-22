@@ -9,9 +9,7 @@ import asyncio
 import aiohttp
 from datetime import datetime, timedelta
 from collections import defaultdict
-import grpc
-from yellowstone_grpc_proto.geyser.geyser_pb2 import SubscribeRequest, SubscribeRequestFilterTransactions
-from yellowstone_grpc_proto.geyser.geyser_pb2_grpc import GeyserStub
+
 
 # Load environment variables
 load_dotenv()
