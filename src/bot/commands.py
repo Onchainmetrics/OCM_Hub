@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from src.config.config import ALLOWED_USERS
-from src.dune.client import DuneAnalytics
+from src.dune.client import DuneAnalytics, get_token_activity
 import logging
 import pandas as pd
 from telegram.ext import Application, CommandHandler
@@ -275,10 +275,68 @@ async def format_heatmap(df: pd.DataFrame) -> str:
     
     return "\n".join(message)
 
+@command_handler
+@cache_command(expire_minutes=15)  # Short cache for fresh tokens
+async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get fresh token analysis"""
+    if not await check_auth(update):
+        return
+        
+    if not context.args:
+        await update.message.reply_text("Please provide a contract address.\nUsage: /scan <contract_address>")
+        return
+        
+    contract_address = context.args[0]
+    try:
+        await update.message.reply_text(f"🔍 Scanning: <code>{contract_address}</code>...\nPlease wait...", parse_mode='HTML')
+        
+        # Get token activity from Helius
+        token_data = await get_token_activity(contract_address)
+        
+        if not token_data:
+            return "❌ No activity found for this token."
+            
+        message = format_scan_message(token_data)
+        return message
+        
+    except Exception as e:
+        logger.error(f"Error in scan command: {e}")
+        return "❌ Error occurred while scanning. Please try again later."
+
+def format_scan_message(data: dict) -> str:
+    """Format scan data into a readable message"""
+    
+    # Early return if no data
+    if not data:
+        return "❌ No data available for this token"
+        
+    # Get basic stats
+    total_buyers = len(data['buyers'])
+    holding = sum(1 for b in data['buyers'].values() if b['total_bought'] > b['total_sold'])
+    added_more = sum(1 for b in data['buyers'].values() if b['buy_count'] > 1)
+    
+    # Recent activity (last 4h)
+    recent = data['recent_trades']
+    buys = sum(1 for t in recent if t.get('is_buy', False))
+    sells = len(recent) - buys
+    
+    message = [
+        "🔍 Fresh Token Analysis\n",
+        f"👥 Early Buyers ({total_buyers}):",
+        f"- {holding} still holding",
+        f"- {added_more} added more\n",
+        "📊 Recent Activity (4h):",
+        f"- {buys} buys vs {sells} sells",
+        f"- {len(set(t['wallet'] for t in recent))} unique traders"
+    ]
+    
+    return "\n".join(message)
+
 welcome_message = (
     "🔍 Welcome to CA Scanner Bot!\n\n"
     "Available commands:\n"
     "/whales <contract_address> - Get whale analysis\n"
+    "/scan <contract_address> - Quick analysis for fresh tokens\n"
     "/heatmap - View live alpha wallet activity\n"
     "/help - Show this help message\n"
     "/testalpha - Test alpha tracker functionality"
@@ -287,7 +345,9 @@ welcome_message = (
 help_text = (
     "🤖 CA Scanner Bot Commands:\n\n"
     "/whales <contract_address>\n"
-    "- Get detailed whale analysis for a token\n\n"
+    "- Get detailed whale analysis for established tokens\n\n"
+    "/scan <contract_address>\n"
+    "- Quick analysis for fresh tokens\n\n"
     "/heatmap\n"
     "- View live alpha wallet activity\n\n"
     "/testalpha\n"
