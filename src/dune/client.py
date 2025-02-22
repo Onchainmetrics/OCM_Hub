@@ -74,11 +74,12 @@ async def get_token_activity(token_address: str) -> dict:
     """Get comprehensive token activity from Helius"""
     helius_key = os.getenv('HELIUS_API_KEY')
     
-    url = f"https://api.helius.xyz/v1/token-transactions?api-key={helius_key}"
+    # Updated endpoint and payload for Helius v0
+    url = f"https://api.helius.xyz/v0/addresses/{token_address}/transactions"
     params = {
-        "mintAccount": token_address,
-        "type": "SWAP",
-        "limit": 100
+        "api-key": helius_key,
+        "until": "now",
+        "type": ["SWAP"]  # Filter for swap transactions
     }
 
     async with aiohttp.ClientSession() as session:
@@ -103,9 +104,16 @@ async def get_token_activity(token_address: str) -> dict:
             recent_trades = []
             
             for tx in transactions:
-                timestamp = datetime.fromisoformat(tx['timestamp'])
-                wallet = tx['accountData']['account']
-                is_buy = tx['type'] == 'buy'  # Adjust based on actual Helius response
+                # Parse Helius transaction format
+                timestamp = datetime.fromtimestamp(tx['timestamp'])
+                wallet = tx['sourceAddress']  # or tx['accountData']['account'] depending on response
+                
+                # Determine if buy or sell based on Helius tx data
+                is_buy = any(
+                    instruction['type'] == 'SWAP' and 
+                    instruction['data'].get('tokenInSymbol') == 'SOL'
+                    for instruction in tx.get('instructions', [])
+                )
                 
                 if not first_tx_time:
                     first_tx_time = timestamp
@@ -114,10 +122,10 @@ async def get_token_activity(token_address: str) -> dict:
                 if is_buy:
                     if not buyers[wallet]['first_buy_time']:
                         buyers[wallet]['first_buy_time'] = timestamp
-                    buyers[wallet]['total_bought'] += tx['amount']
+                    buyers[wallet]['total_bought'] += float(tx['amount'])
                     buyers[wallet]['buy_count'] += 1
                 else:
-                    buyers[wallet]['total_sold'] += tx['amount']
+                    buyers[wallet]['total_sold'] += float(tx['amount'])
                     buyers[wallet]['sell_count'] += 1
                 
                 # Track recent activity (last 4h)
@@ -126,7 +134,7 @@ async def get_token_activity(token_address: str) -> dict:
                         'timestamp': timestamp,
                         'wallet': wallet,
                         'is_buy': is_buy,
-                        'amount': tx['amount']
+                        'amount': float(tx['amount'])
                     })
             
             return {
