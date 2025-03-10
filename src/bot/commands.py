@@ -2,6 +2,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from src.config.config import ALLOWED_USERS
 from src.dune.client import DuneAnalytics
+from src.utils.plotting import create_whale_flow_chart, base64_to_buffer
 import logging
 import pandas as pd
 from telegram.ext import Application, CommandHandler
@@ -52,12 +53,24 @@ def command_handler(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await func(update, context)
-        if result:  # Only send if we got a result
-            await update.message.reply_text(
-                result,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
+        if result:
+            if isinstance(result, dict) and 'message' in result and 'chart_base64' in result:
+                # Send text message
+                await update.message.reply_text(
+                    result['message'],
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+                # Convert base64 back to buffer and send photo
+                chart_buffer = base64_to_buffer(result['chart_base64'])
+                await update.message.reply_photo(chart_buffer)
+            else:
+                # Handle text-only messages as before
+                await update.message.reply_text(
+                    result,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
     return wrapper
 
 def format_whale_message(df: pd.DataFrame) -> str:
@@ -156,10 +169,21 @@ async def whales_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if df.empty:
             return "❌ No whale data found for this token."
             
+        # Generate the text message
         message = format_whale_message(df)
+        
+        # Generate the flow chart
+        token_symbol = df['token_symbol'].iloc[0]
+        base64_str, chart_buffer = create_whale_flow_chart(df, token_symbol)
+        
         execution_time = time.time() - start_time  # Calculate execution time
         logger.info(f"Whales command executed in {execution_time:.2f} seconds")  # Log timing
-        return message
+        
+        # Return message and base64 string for caching
+        return {
+            'message': message,
+            'chart_base64': base64_str
+        }
         
     except Exception as e:
         logger.error(f"Error in whales command: {e}")
