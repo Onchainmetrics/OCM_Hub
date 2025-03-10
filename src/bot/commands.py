@@ -65,9 +65,14 @@ def format_whale_message(df: pd.DataFrame) -> str:
     message += f"🏦 MCap: ${current_mcap:,.0f}\n"
     message += f"📊 Total Whales: {total_whales}\n\n"
     
+    # Sort by current holdings (usd_value) for top 5 display
+    # Filter to only include current holders (token_balance > 0) first
+    current_holders = df[df['token_balance'] > 0].sort_values('usd_value', ascending=False)
+    top_5_holders = current_holders.head(5)
+    
     # Add top 5 whales with HTML formatting
-    message += "Top 5 by USD Value:\n"
-    for i, whale in df.head(5).iterrows():
+    message += "Top 5 Current Holders:\n"
+    for i, whale in top_5_holders.iterrows():
         addr_short = f"{whale['address'][:6]}...{whale['address'][-4:]}"
         solscan_link = f"https://solscan.io/account/{whale['address']}"
         supply_pct = float(str(whale['supply_owned']).replace('%', ''))
@@ -79,11 +84,7 @@ def format_whale_message(df: pd.DataFrame) -> str:
         cost_basis_mcap = float(avg_cost_per_token * total_supply)
         
         # Format position status
-        position_status = ""
-        if token_balance == 0:
-            position_status = "📤 Position: Exited"
-        else:
-            position_status = f"💰 Value: ${float(whale['usd_value']):,.0f}"
+        position_status = f"💰 Value: ${float(whale['usd_value']):,.0f}"
         
         message += (
             f"{i+1}. <a href='{solscan_link}'>{addr_short}</a> ({supply_pct:.2f}%)\n"
@@ -155,6 +156,14 @@ async def heatmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     try:
+        # Parse mode from arguments
+        mode = 'elite'  # default to elite mode
+        if context.args:
+            if context.args[0].lower() == 'all':
+                mode = 'all'
+            elif context.args[0].lower() != 'elite':
+                return "❌ Invalid mode. Usage: /heatmap [elite|all]"
+
         await update.message.reply_text("🔍 Analyzing alpha activity...\nPlease wait...")
         
         dune = DuneAnalytics()
@@ -162,6 +171,10 @@ async def heatmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if df is None or df.empty:
             return "❌ No data found. Please try again later."
+            
+        # Filter out "Other" category if in elite mode
+        if mode == 'elite':
+            df = df[df['trader_type'] != 'Other']
             
         message = await format_heatmap(df)
         return message  # Return for caching
@@ -206,7 +219,7 @@ def format_token_info(row, timeframe='1h'):
     return (
         f"⚡️ ${row['symbol']}: {flow_str} "
         f"({'🟢' if flow > 0 else '🔴'}) "
-        f"[{alpha_count}w] | "  # Changed from α to w
+        f"[{alpha_count}w] | "
         f"<code>{row['token_address']}</code>"
     )
 
