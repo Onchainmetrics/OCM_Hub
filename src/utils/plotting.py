@@ -45,37 +45,13 @@ def create_whale_flow_chart(df: pd.DataFrame, token_symbol: str) -> tuple[str, i
         height=0.6  # Reduce bar height for better spacing
     )
     
-    # Add wallet count and average flow annotations with adjusted positioning
-    for idx, bar in enumerate(bars):
-        row = whale_summary.iloc[idx]
-        flow = row['flow_90d']
-        wallet_count = row['wallet_count']
-        avg_flow = row['avg_flow_per_wallet'] / 1000  # Convert to thousands
-        
-        # Position the text based on whether the flow is positive or negative
-        x_pos = bar.get_x() + (bar.get_width() if flow > 0 else 0)
-        ha = 'left' if flow > 0 else 'right'
-        x_offset = 0.05 if flow > 0 else -0.05  # Reduced offset
-        
-        # Add text with background for better readability
-        text = f"{wallet_count} wallets\n${abs(avg_flow):,.1f}k/wallet"
-        ax.text(
-            x_pos + x_offset * max(abs(whale_summary['flow_90d'])) / 1000,
-            bar.get_y() + bar.get_height()/2,
-            text,
-            va='center',
-            ha=ha,
-            fontsize=9,
-            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1)
-        )
-    
     # Get trend indicator
     def get_trend_indicator(pressure):
-        if pressure > 40: return "HEAVY ACC."
-        if pressure > 20: return "ACC."
+        if pressure > 40: return "HEAVY ACCUMULATION"
+        if pressure > 20: return "ACCUMULATION"
         if pressure > -20: return "NEUTRAL"
-        if pressure > -40: return "DIST."
-        return "HEAVY DIST."
+        if pressure > -40: return "DISTRIBUTION"
+        return "HEAVY DISTRIBUTION"
     
     trend = get_trend_indicator(net_pressure)
     trend_color = '#00C805' if net_pressure > 0 else '#FF4B4B' if net_pressure < 0 else '#808080'
@@ -83,7 +59,7 @@ def create_whale_flow_chart(df: pd.DataFrame, token_symbol: str) -> tuple[str, i
     # Customize the plot with new title format
     title = (
         f"Whale Flows by Behavior Pattern | {token_symbol.upper()}\n"
-        f"90d flows | As of {datetime.now().strftime('%Y-%m-%d')} | "
+        f"90d flows | As of {datetime.now().strftime('%Y-%m-%d')} |"
     )
     
     ax.set_title(title, pad=20, fontsize=12, fontweight='bold')
@@ -97,6 +73,35 @@ def create_whale_flow_chart(df: pd.DataFrame, token_symbol: str) -> tuple[str, i
         fontweight='bold',
         ha='center'
     )
+    
+    # Add wallet count and average flow annotations with adjusted positioning
+    for idx, bar in enumerate(bars):
+        row = whale_summary.iloc[idx]
+        flow = row['flow_90d']
+        wallet_count = row['wallet_count']
+        avg_flow = row['avg_flow_per_wallet'] / 1000  # Convert to thousands
+        
+        # Position the text based on whether the flow is positive or negative
+        if flow > 0:
+            # For positive flows (green bars), position text at 95% of the bar width
+            x_pos = bar.get_x() + (bar.get_width() * 0.95)
+            ha = 'right'
+        else:
+            # For negative flows (red bars), keep current positioning
+            x_pos = bar.get_x() + bar.get_width()
+            ha = 'right'
+        
+        # Add text with background for better readability
+        text = f"{wallet_count} wallets\n${abs(avg_flow):,.1f}k/wallet"
+        ax.text(
+            x_pos,
+            bar.get_y() + bar.get_height()/2,
+            text,
+            va='center',
+            ha=ha,
+            fontsize=9,
+            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1)
+        )
     
     # Add percentage axis on the right with improved spacing
     ax2 = ax.twinx()
