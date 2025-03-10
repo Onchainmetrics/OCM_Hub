@@ -31,7 +31,9 @@ def create_whale_flow_chart(df: pd.DataFrame, token_symbol: str) -> tuple[str, i
     net_pressure = whale_summary['flow_90d'].sum() / total_flow * 100
     
     # Set up the plot style
-    plt.style.use('seaborn')
+    plt.style.use('classic')  # Changed from 'seaborn' to 'classic'
+    sns.set_style("whitegrid")  # Add seaborn's grid style separately
+    
     fig, ax = plt.subplots(figsize=(12, 8))
     
     # Create horizontal bars
