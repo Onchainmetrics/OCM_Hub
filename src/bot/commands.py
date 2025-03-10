@@ -149,7 +149,6 @@ async def whales_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return "❌ Error occurred while analyzing whales. Please try again later."
 
 @command_handler
-@cache_command(expire_minutes=15, cache_key_fn=lambda update, context: f"heatmap_{context.args[0] if context.args else 'elite'}")
 async def heatmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get heatmap analysis"""
     if not await check_auth(update):
@@ -164,24 +163,48 @@ async def heatmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif context.args[0].lower() != 'elite':
                 return "❌ Invalid mode. Usage: /heatmap [elite|all]"
 
-        await update.message.reply_text("🔍 Analyzing alpha activity...\nPlease wait...")
-        
-        dune = DuneAnalytics()
-        df = await dune.get_heatmap_analysis()
-        
-        if df is None or df.empty:
-            return "❌ No data found. Please try again later."
-            
-        # Filter out "Other" category if in elite mode
-        if mode == 'elite':
-            df = df[df['trader_type'] != 'Other']
-            
-        message = await format_heatmap(df)
-        return message  # Return for caching
+        # Call the appropriate cached function based on mode
+        if mode == 'all':
+            return await _heatmap_all(update, context)
+        else:
+            return await _heatmap_elite(update, context)
         
     except Exception as e:
         logger.error(f"Error in heatmap command: {e}")
         return "❌ Error occurred while analyzing alpha activity. Please try again later."
+
+@cache_command(expire_minutes=15)
+async def _heatmap_elite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get heatmap analysis for elite traders only"""
+    await update.message.reply_text("🔍 Analyzing alpha activity...\nPlease wait...")
+    
+    dune = DuneAnalytics()
+    df = await dune.get_heatmap_analysis()
+    
+    if df is None or df.empty:
+        return "❌ No data found. Please try again later."
+        
+    # Filter out "Other" category
+    df = df[df['trader_type'] != 'Other']
+    
+    message = await format_heatmap(df)
+    message = "Mode: Elite Traders Only\n\n" + message
+    return message
+
+@cache_command(expire_minutes=15)
+async def _heatmap_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get heatmap analysis for all traders"""
+    await update.message.reply_text("🔍 Analyzing alpha activity...\nPlease wait...")
+    
+    dune = DuneAnalytics()
+    df = await dune.get_heatmap_analysis()
+    
+    if df is None or df.empty:
+        return "❌ No data found. Please try again later."
+    
+    message = await format_heatmap(df)
+    message = "Mode: All Traders\n\n" + message
+    return message
 
 async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Test alpha tracker functionality"""
