@@ -179,13 +179,11 @@ async def _heatmap_elite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔍 Analyzing alpha activity...\nPlease wait...")
     
     dune = DuneAnalytics()
-    df = await dune.get_heatmap_analysis()
+    # Use the elite-only query that filters out "Other" category
+    df = await dune.get_heatmap_analysis(query_id=4830441)
     
     if df is None or df.empty:
         return "❌ No data found. Please try again later."
-        
-    # Filter out "Other" category
-    df = df[df['trader_type'] != 'Other']
     
     message = await format_heatmap(df)
     message = "Mode: Elite Traders Only\n\n" + message
@@ -197,7 +195,8 @@ async def _heatmap_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔍 Analyzing alpha activity...\nPlease wait...")
     
     dune = DuneAnalytics()
-    df = await dune.get_heatmap_analysis()
+    # Use the original query that includes all traders
+    df = await dune.get_heatmap_analysis(query_id=4723009)
     
     if df is None or df.empty:
         return "❌ No data found. Please try again later."
