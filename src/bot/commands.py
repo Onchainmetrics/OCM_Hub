@@ -31,12 +31,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /help is issued."""
-    help_text = """
-Available commands:
-/help - Show this help message
-/whales <contract_address> - Get detailed whale analysis and behavior patterns
-/testalpha - Test alpha tracker functionality
-"""
     await update.message.reply_text(help_text)
 
 def command_handler(func):
@@ -54,6 +48,15 @@ def command_handler(func):
 
 def format_whale_message(df: pd.DataFrame) -> str:
     """Format whale analysis data into a message"""
+    # Convert numeric columns to float
+    numeric_columns = ['current_price', 'total_supply', 'token_balance', 'total_bought_usd', 
+                      'usd_value', 'unrealized_pnl', 'net_position_7d_usd', 
+                      'net_position_30d_usd', 'net_position_90d_usd']
+    
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
     current_price = float(df['current_price'].iloc[0])
     total_whales = len(df)
     token_symbol = df['token_symbol'].iloc[0]
@@ -185,7 +188,7 @@ async def _heatmap_elite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if df is None or df.empty:
         return "❌ No data found. Please try again later."
     
-    message = await format_heatmap(df)
+    message = await format_heatmap(df, is_elite_mode=True)
     message = "Mode: Elite Traders Only\n\n" + message
     return message
 
@@ -201,7 +204,7 @@ async def _heatmap_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if df is None or df.empty:
         return "❌ No data found. Please try again later."
     
-    message = await format_heatmap(df)
+    message = await format_heatmap(df, is_elite_mode=False)
     message = "Mode: All Traders\n\n" + message
     return message
 
@@ -245,7 +248,7 @@ def format_token_info(row, timeframe='1h'):
         f"<code>{row['token_address']}</code>"
     )
 
-async def format_heatmap(df: pd.DataFrame) -> str:
+async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     """Format heatmap data for clear alpha signals"""
     
     if df.empty:
@@ -255,6 +258,10 @@ async def format_heatmap(df: pd.DataFrame) -> str:
     message = [
         "💡 Click on the contract address to copy it\n"
     ]
+    
+    # Set thresholds based on mode
+    high_alpha_threshold = 2 if is_elite_mode else 10
+    medium_alpha_threshold = 1 if is_elite_mode else 5
     
     # 1H Activity
     active_1h_df = df[df['flow_1h'].abs() >= 10000].copy()
@@ -296,8 +303,8 @@ async def format_heatmap(df: pd.DataFrame) -> str:
             ascending=[False, False]
         )
         
-        # High Alpha (10+ alphas)
-        high_alpha = sorted_df[sorted_df['active_alphas'] >= 10]
+        # High Alpha (2+ alphas for elite mode, 10+ for all mode)
+        high_alpha = sorted_df[sorted_df['active_alphas'] >= high_alpha_threshold]
         if not high_alpha.empty:
             message.append("\n🔥 High Alpha Interest:")
             for _, row in high_alpha.head(10).iterrows():
@@ -305,10 +312,10 @@ async def format_heatmap(df: pd.DataFrame) -> str:
                 if formatted:
                     message.append(formatted)
         
-        # Medium Alpha (5-9 alphas)
+        # Medium Alpha (1 alpha for elite mode, 5-9 for all mode)
         medium_alpha = sorted_df[
-            (sorted_df['active_alphas'] >= 5) & 
-            (sorted_df['active_alphas'] < 10)
+            (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
+            (sorted_df['active_alphas'] < high_alpha_threshold)
         ]
         if not medium_alpha.empty:
             message.append("\n📈 Medium Alpha Interest:")
