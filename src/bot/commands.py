@@ -11,6 +11,20 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Flow thresholds for different modes and timeframes
+FLOW_THRESHOLDS = {
+    'elite': {
+        '1h': 1000,
+        '4h': 2000,
+        '24h': 2500
+    },
+    'all': {
+        '1h': 5000,
+        '4h': 7500,
+        '24h': 10000
+    }
+}
+
 async def check_auth(update: Update) -> bool:
     """Check if user is authorized to use the bot"""
     user_id = str(update.effective_user.id)
@@ -222,12 +236,16 @@ async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Error testing alpha tracker: {e}")
         await update.message.reply_text("❌ Error testing alpha tracker")
 
-def format_token_info(row, timeframe='1h'):
+def format_token_info(row, timeframe='1h', is_elite_mode=False):
     flow = row[f'flow_{timeframe}']
     flow_abs = abs(flow)
     
-    # Only show tokens with >$10k flow
-    if flow_abs < 10000:
+    # Get minimum flow threshold from constants
+    mode = 'elite' if is_elite_mode else 'all'
+    min_flow = FLOW_THRESHOLDS[mode][timeframe]
+    
+    # Only show tokens with flow above threshold
+    if flow_abs < min_flow:
         return None
         
     # Format dollar amount with K/M suffix
@@ -263,8 +281,11 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     high_alpha_threshold = 2 if is_elite_mode else 10
     medium_alpha_threshold = 1 if is_elite_mode else 5
     
+    mode = 'elite' if is_elite_mode else 'all'
+    
     # 1H Activity
-    active_1h_df = df[df['flow_1h'].abs() >= 10000].copy()
+    min_flow_1h = FLOW_THRESHOLDS[mode]['1h']
+    active_1h_df = df[df['flow_1h'].abs() >= min_flow_1h].copy()
     message.append("⚡️ Live Alpha Activity (1H)")
     if not active_1h_df.empty:
         sorted_1h = active_1h_df.sort_values(
@@ -272,14 +293,15 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
             ascending=[False, False]
         ).head(10)
         for _, row in sorted_1h.iterrows():
-            formatted = format_token_info(row, '1h')
+            formatted = format_token_info(row, '1h', is_elite_mode)
             if formatted:
                 message.append(formatted)
     else:
         message.append("No immediate alpha activity")
     
     # 4H Activity
-    active_4h_df = df[df['flow_4h'].abs() >= 10000].copy()
+    min_flow_4h = FLOW_THRESHOLDS[mode]['4h']
+    active_4h_df = df[df['flow_4h'].abs() >= min_flow_4h].copy()
     message.append("\n🔥 Recent Alpha Activity (4H)")
     if not active_4h_df.empty:
         sorted_4h = active_4h_df.sort_values(
@@ -287,14 +309,15 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
             ascending=[False, False]
         ).head(10)
         for _, row in sorted_4h.iterrows():
-            formatted = format_token_info(row, '4h')
+            formatted = format_token_info(row, '4h', is_elite_mode)
             if formatted:
                 message.append(formatted)
     else:
         message.append("No recent alpha activity")
     
     # 24H Activity
-    active_24h_df = df[df['flow_24h'].abs() >= 10000].copy()
+    min_flow_24h = FLOW_THRESHOLDS[mode]['24h']
+    active_24h_df = df[df['flow_24h'].abs() >= min_flow_24h].copy()
     if not active_24h_df.empty:
         message.append("\n📊 24H Alpha Activity")
         
@@ -308,7 +331,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
         if not high_alpha.empty:
             message.append("\n🔥 High Alpha Interest:")
             for _, row in high_alpha.head(10).iterrows():
-                formatted = format_token_info(row, '24h')
+                formatted = format_token_info(row, '24h', is_elite_mode)
                 if formatted:
                     message.append(formatted)
         
@@ -320,7 +343,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
         if not medium_alpha.empty:
             message.append("\n📈 Medium Alpha Interest:")
             for _, row in medium_alpha.head(8).iterrows():
-                formatted = format_token_info(row, '24h')
+                formatted = format_token_info(row, '24h', is_elite_mode)
                 if formatted:
                     message.append(formatted)
     
