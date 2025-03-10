@@ -149,7 +149,7 @@ async def whales_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return "❌ Error occurred while analyzing whales. Please try again later."
 
 @command_handler
-@cache_command(expire_minutes=15)
+@cache_command(expire_minutes=15, cache_key_fn=lambda update, context: f"heatmap_{context.args[0] if context.args else 'elite'}")
 async def heatmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get heatmap analysis"""
     if not await check_auth(update):
@@ -301,7 +301,7 @@ welcome_message = (
     "🔍 Welcome to CA Scanner Bot!\n\n"
     "Available commands:\n"
     "/whales <contract_address> - Get whale analysis\n"
-    "/heatmap - View live alpha wallet activity\n"
+    "/heatmap [elite|all] - View live alpha wallet activity\n"
     "/help - Show this help message\n"
     "/testalpha - Test alpha tracker functionality"
 )
@@ -310,8 +310,10 @@ help_text = (
     "🤖 CA Scanner Bot Commands:\n\n"
     "/whales <contract_address>\n"
     "- Get detailed whale analysis for a token\n\n"
-    "/heatmap\n"
-    "- View live alpha wallet activity\n\n"
+    "/heatmap [elite|all]\n"
+    "- View live alpha wallet activity\n"
+    "- Use 'elite' for elite traders only (default)\n"
+    "- Use 'all' to include all traders\n\n"
     "/testalpha\n"
     "- Test alpha tracker functionality\n\n"
     "/help\n"
