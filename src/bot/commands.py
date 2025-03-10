@@ -75,7 +75,7 @@ def format_whale_message(df: pd.DataFrame) -> str:
     
     # Add top 5 whales with HTML formatting
     message += "Top 5 Current Holders:\n"
-    for i, whale in top_5_holders.iterrows():
+    for idx, (_, whale) in enumerate(top_5_holders.iterrows(), 1):
         addr_short = f"{whale['address'][:6]}...{whale['address'][-4:]}"
         solscan_link = f"https://solscan.io/account/{whale['address']}"
         supply_pct = float(str(whale['supply_owned']).replace('%', ''))
@@ -90,7 +90,7 @@ def format_whale_message(df: pd.DataFrame) -> str:
         position_status = f"💰 Value: ${float(whale['usd_value']):,.0f}"
         
         message += (
-            f"{i+1}. <a href='{solscan_link}'>{addr_short}</a> ({supply_pct:.2f}%)\n"
+            f"{idx}. <a href='{solscan_link}'>{addr_short}</a> ({supply_pct:.2f}%)\n"
             f"   {position_status}\n"
             f"   💵 PnL: ${float(whale['unrealized_pnl']):,.0f}\n"
             f"   💎 Cost Basis MCap: ${cost_basis_mcap:,.0f}\n"
