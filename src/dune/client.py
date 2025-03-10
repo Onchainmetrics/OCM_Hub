@@ -21,7 +21,7 @@ class DuneAnalytics:
         try:
             query = QueryBase(
                 name="Whale Analysis",
-                query_id=4557213,
+                query_id=4780669,
                 params=[
                     QueryParameter.text_type(
                         name="Contract Address",

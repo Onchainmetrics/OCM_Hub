@@ -76,7 +76,7 @@ class AlphaTracker:
                         wallet = row['wallet']
                         new_addresses.append(wallet)
                         new_profiles[wallet] = {
-                            'category': row['trader_category'],
+                            'category': row['trader_type'],
                             'win_rate': row.get('win_rate', 0),
                             'avg_hold_hours': row.get('avg_hold_hours', 0),
                             'trades_per_day': row.get('trades_per_day', 0),
@@ -252,12 +252,12 @@ class PatternDetector:
         if not token_txs:
             return patterns
             
-        # Pattern 1: Multiple Alpha traders active
+        # Pattern 1: Multiple Alpha Traders activity
         alpha_pattern = self._check_alpha_pattern(token_txs)
         if alpha_pattern:
             patterns.append(alpha_pattern)
             
-        # Pattern 2: Early Alpha followed by Position traders
+        # Pattern 2: Alpha Traders followed by Volume Leaders or Steady Elite
         sequence_pattern = self._check_sequence_pattern(token_txs)
         if sequence_pattern:
             patterns.append(sequence_pattern)
@@ -270,49 +270,51 @@ class PatternDetector:
         return patterns
         
     def _check_alpha_pattern(self, transactions: List[dict]) -> str:
-        """Check for multiple Alpha traders activity"""
+        """Check for multiple Alpha Traders activity"""
         last_hour = datetime.now() - timedelta(hours=1)
         recent_txs = [tx for tx in transactions if tx['timestamp'] > last_hour]
         
         alpha_buyers = set(
             tx['wallet'] for tx in recent_txs
-            if tx['trader_type'] == 'Alpha' and tx['action'] == 'buy'
+            if tx['trader_type'] == 'Alpha Traders' and tx['action'] == 'buy'
         )
         
         alpha_sellers = set(
             tx['wallet'] for tx in recent_txs
-            if tx['trader_type'] == 'Alpha' and tx['action'] == 'sell'
+            if tx['trader_type'] == 'Alpha Traders' and tx['action'] == 'sell'
         )
         
         if len(alpha_buyers) >= 2:
-            return f"🎯 Multiple Alpha traders ({len(alpha_buyers)}) buying in last hour"
+            return f"🎯 Multiple Alpha Traders ({len(alpha_buyers)}) buying in last hour"
         elif len(alpha_sellers) >= 2:
-            return f"⚠️ Multiple Alpha traders ({len(alpha_sellers)}) selling in last hour"
+            return f"⚠️ Multiple Alpha Traders ({len(alpha_sellers)}) selling in last hour"
             
         return None
         
     def _check_sequence_pattern(self, transactions: List[dict]) -> str:
-        """Check for Alpha traders followed by Position traders"""
+        """Check for Alpha Traders followed by Volume Leaders or Steady Elite"""
         last_4h = datetime.now() - timedelta(hours=4)
         recent_txs = [tx for tx in transactions if tx['timestamp'] > last_4h]
         
-        # Look for early Alpha buys followed by Position trader buys
+        # Look for early Alpha Traders buys
         alpha_buy_time = None
         for tx in recent_txs:
-            if tx['trader_type'] == 'Alpha' and tx['action'] == 'buy':
+            if tx['trader_type'] == 'Alpha Traders' and tx['action'] == 'buy':
                 alpha_buy_time = tx['timestamp']
                 break
                 
         if alpha_buy_time:
-            subsequent_position_buyers = set(
-                tx['wallet'] for tx in recent_txs
+            subsequent_buyers = {
+                tx['trader_type']: tx['wallet']
+                for tx in recent_txs
                 if tx['timestamp'] > alpha_buy_time 
-                and tx['trader_type'] == 'Position'
+                and tx['trader_type'] in ['Volume Leaders', 'Steady Elite']
                 and tx['action'] == 'buy'
-            )
+            }
             
-            if len(subsequent_position_buyers) >= 2:
-                return "🎯 Alpha entry followed by Position trader buys"
+            if len(subsequent_buyers) >= 2:
+                follower_types = ', '.join(subsequent_buyers.keys())
+                return f"🎯 Alpha Traders entry followed by {follower_types}"
                 
         return None
         
@@ -324,9 +326,10 @@ class PatternDetector:
         buyer_types = set(
             tx['trader_type'] for tx in recent_txs
             if tx['action'] == 'buy'
+            and tx['trader_type'] in ['Alpha Traders', 'Volume Leaders', 'Steady Elite']
         )
         
-        if len(buyer_types) >= 3:  # At least 3 different types buying
+        if len(buyer_types) >= 2:  # Changed to 2 since we now have 3 specific types
             return f"💫 Multiple trader types buying ({', '.join(buyer_types)})"
             
         return None

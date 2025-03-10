@@ -74,18 +74,26 @@ def format_whale_message(df: pd.DataFrame) -> str:
         
         # Calculate average cost basis and equivalent marketcap
         token_balance = float(whale['token_balance'])
-        capital_invested = float(whale['capital_invested'])
+        capital_invested = float(whale['total_bought_usd'])
         avg_cost_per_token = capital_invested / token_balance if token_balance > 0 else 0
         cost_basis_mcap = float(avg_cost_per_token * total_supply)
         
+        # Format position status
+        position_status = ""
+        if token_balance == 0:
+            position_status = "📤 Position: Exited"
+        else:
+            position_status = f"💰 Value: ${float(whale['usd_value']):,.0f}"
+        
         message += (
             f"{i+1}. <a href='{solscan_link}'>{addr_short}</a> ({supply_pct:.2f}%)\n"
-            f"   💰 Value: ${float(whale['usd_value']):,.0f}\n"
+            f"   {position_status}\n"
             f"   💵 PnL: ${float(whale['unrealized_pnl']):,.0f}\n"
             f"   💎 Cost Basis MCap: ${cost_basis_mcap:,.0f}\n"
             f"   📊 Status: {whale['behavior_pattern']}\n"
             f"   7d: ${float(whale['net_position_7d_usd']):,.0f} | "
-            f"30d: ${float(whale['net_position_30d_usd']):,.0f}\n\n"
+            f"30d: ${float(whale['net_position_30d_usd']):,.0f} | "
+            f"90d: ${float(whale['net_position_90d_usd']):,.0f}\n\n"
         )
     
     # Add behavior summary
@@ -101,7 +109,8 @@ def format_whale_message(df: pd.DataFrame) -> str:
             'MIXED': '🟣',
             'ALPHA_ACCUMULATING': '💎',
             'ALPHA_DISTRIBUTING': '⚠️',
-            'ALPHA_NEUTRAL': '🔷'
+            'ALPHA_NEUTRAL': '🔷',
+            'EXITED': '📤'
         }.get(pattern, '⚪️')
         message += f"{emoji} {pattern}: {count} whales\n"
         
