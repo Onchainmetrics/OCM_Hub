@@ -6,3 +6,5 @@ redis==5.0.1
 pytest==7.4.4
 pytest-asyncio==0.23.5
 prometheus-client==0.19.0
+matplotlib==3.8.2
+seaborn==0.13.2

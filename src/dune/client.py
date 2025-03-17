@@ -44,13 +44,13 @@ class DuneAnalytics:
             logger.error(f"Query parameters: Contract Address={contract_address}")
             raise 
 
-    async def get_heatmap_analysis(self) -> pd.DataFrame:
+    async def get_heatmap_analysis(self, query_id: int = 4723009) -> pd.DataFrame:
         """Execute query for heatmap analysis of alpha wallet activity"""
         try:
             # Create query object
             query = QueryBase(
                 name="Heatmap Analysis",
-                query_id=4723009
+                query_id=query_id
             )
             
             # Execute query
