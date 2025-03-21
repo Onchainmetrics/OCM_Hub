@@ -196,19 +196,18 @@ async def heatmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     try:
-        # Parse mode from arguments
-        mode = 'elite'  # default to elite mode
+        # Check if mode is explicitly provided
+        mode = None
         if context.args:
             if context.args[0].lower() == 'all':
-                mode = 'all'
-            elif context.args[0].lower() != 'elite':
+                return await _heatmap_all(update, context)
+            elif context.args[0].lower() == 'elite':
+                mode = 'elite'
+            else:
                 return "❌ Invalid mode. Usage: /heatmap [elite|all]"
-
-        # Call the appropriate cached function based on mode
-        if mode == 'all':
-            return await _heatmap_all(update, context)
-        else:
-            return await _heatmap_elite(update, context)
+        
+        # If no mode provided or mode is 'elite', use _heatmap_elite
+        return await _heatmap_elite(update, context)
         
     except Exception as e:
         logger.error(f"Error in heatmap command: {e}")
@@ -223,8 +222,8 @@ async def _heatmap_elite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Use the elite-only query that filters out "Other" category
     df = await dune.get_heatmap_analysis(query_id=4830441)
     
-    if df is None or df.empty:
-        return "❌ No data found. Please try again later."
+    if df is None:
+        return "❌ Error fetching data. Please try again later."
     
     message = await format_heatmap(df, is_elite_mode=True)
     message = "Mode: Elite Traders Only\n\n" + message
@@ -239,26 +238,12 @@ async def _heatmap_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Use the original query that includes all traders
     df = await dune.get_heatmap_analysis(query_id=4723009)
     
-    if df is None or df.empty:
-        return "❌ No data found. Please try again later."
+    if df is None:
+        return "❌ Error fetching data. Please try again later."
     
     message = await format_heatmap(df, is_elite_mode=False)
     message = "Mode: All Traders\n\n" + message
     return message
-
-async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Test alpha tracker functionality"""
-    if not await check_auth(update):
-        return
-        
-    try:
-        await update.message.reply_text("🔄 Testing alpha tracker...")
-        await context.application.alpha_tracker.update_alpha_addresses()
-        num_addresses = len(context.application.alpha_tracker.alpha_addresses)
-        await update.message.reply_text(f"✅ Successfully loaded {num_addresses} alpha addresses")
-    except Exception as e:
-        logger.error(f"Error testing alpha tracker: {e}")
-        await update.message.reply_text("❌ Error testing alpha tracker")
 
 def format_token_info(row, timeframe='1h', is_elite_mode=False):
     flow = row[f'flow_{timeframe}']
@@ -294,7 +279,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     """Format heatmap data for clear alpha signals"""
     
     if df.empty:
-        return "🔍 No significant alpha activity detected in the last 24h"
+        return "🌶️ Market cooked! No significant alpha activity detected in the last 24h"
     
     # Start with explanation of how to copy CAs
     message = [
@@ -316,10 +301,14 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
             by=['active_alphas', 'flow_1h'], 
             ascending=[False, False]
         ).head(10)
+        has_activity = False
         for _, row in sorted_1h.iterrows():
             formatted = format_token_info(row, '1h', is_elite_mode)
             if formatted:
+                has_activity = True
                 message.append(formatted)
+        if not has_activity:
+            message.append("No immediate alpha activity")
     else:
         message.append("No immediate alpha activity")
     
@@ -332,32 +321,43 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
             by=['active_alphas', 'flow_4h'], 
             ascending=[False, False]
         ).head(10)
+        has_activity = False
         for _, row in sorted_4h.iterrows():
             formatted = format_token_info(row, '4h', is_elite_mode)
             if formatted:
+                has_activity = True
                 message.append(formatted)
+        if not has_activity:
+            message.append("No recent alpha activity")
     else:
         message.append("No recent alpha activity")
     
     # 24H Activity
     min_flow_24h = FLOW_THRESHOLDS[mode]['24h']
     active_24h_df = df[df['flow_24h'].abs() >= min_flow_24h].copy()
+    message.append("\n📊 24H Alpha Activity")
+    
     if not active_24h_df.empty:
-        message.append("\n📊 24H Alpha Activity")
-        
         sorted_df = active_24h_df.sort_values(
             by=['active_alphas', 'flow_24h'],
             ascending=[False, False]
         )
         
+        has_any_activity = False
+        
         # High Alpha (2+ alphas for elite mode, 10+ for all mode)
         high_alpha = sorted_df[sorted_df['active_alphas'] >= high_alpha_threshold]
         if not high_alpha.empty:
             message.append("\n🔥 High Alpha Interest:")
+            has_high_activity = False
             for _, row in high_alpha.head(10).iterrows():
                 formatted = format_token_info(row, '24h', is_elite_mode)
                 if formatted:
+                    has_high_activity = True
+                    has_any_activity = True
                     message.append(formatted)
+            if not has_high_activity:
+                message.append("No high alpha activity")
         
         # Medium Alpha (1 alpha for elite mode, 5-9 for all mode)
         medium_alpha = sorted_df[
@@ -366,10 +366,20 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
         ]
         if not medium_alpha.empty:
             message.append("\n📈 Medium Alpha Interest:")
+            has_medium_activity = False
             for _, row in medium_alpha.head(8).iterrows():
                 formatted = format_token_info(row, '24h', is_elite_mode)
                 if formatted:
+                    has_medium_activity = True
+                    has_any_activity = True
                     message.append(formatted)
+            if not has_medium_activity:
+                message.append("No medium alpha activity")
+        
+        if not has_any_activity:
+            message.append("\n🌶️ Market cooked! No significant activity in the last 24h")
+    else:
+        message.append("\n🌶️ Market cooked! No significant activity in the last 24h")
     
     return "\n".join(message)
 
@@ -378,8 +388,7 @@ welcome_message = (
     "Available commands:\n"
     "/whales <contract_address> - Get whale analysis\n"
     "/heatmap [elite|all] - View live alpha wallet activity\n"
-    "/help - Show this help message\n"
-    "/testalpha - Test alpha tracker functionality"
+    "/help - Show this help message"
 )
 
 help_text = (
@@ -390,8 +399,6 @@ help_text = (
     "- View live alpha wallet activity\n"
     "- Use 'elite' for elite traders only (default)\n"
     "- Use 'all' to include all traders\n\n"
-    "/testalpha\n"
-    "- Test alpha tracker functionality\n\n"
     "/help\n"
     "- Show this help message"
 )
