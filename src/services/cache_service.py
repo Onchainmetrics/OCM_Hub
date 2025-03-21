@@ -127,9 +127,19 @@ def cache_command(expire_minutes: int):
             
             # Generate cache key
             if func.__name__ == 'heatmap_command':
-                cache_key = "heatmap"  # No parameters needed
+                # For heatmap command, check if it's 'all' mode
+                if len(args) > 1 and hasattr(args[1], 'args') and args[1].args:
+                    mode = args[1].args[0].lower()
+                    if mode == 'all':
+                        cache_key = "heatmap:all"
+                    else:
+                        cache_key = "heatmap:elite"  # Both default and explicit elite use same key
+                else:
+                    cache_key = "heatmap:elite"  # Default mode uses elite key
+            elif func.__name__ == '_heatmap_all_internal':
+                cache_key = "heatmap:all"
             else:
-                # For commands with contract address
+                # For other commands with contract address
                 cache_key = f"{func.__name__}:"
                 if len(args) > 1 and hasattr(args[1], 'args') and args[1].args:
                     cache_key += args[1].args[0].lower()  # Contract address in lowercase

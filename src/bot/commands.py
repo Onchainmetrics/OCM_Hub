@@ -190,6 +190,7 @@ async def whales_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return "❌ Error occurred while analyzing whales. Please try again later."
 
 @command_handler
+@cache_command(expire_minutes=15)
 async def heatmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get heatmap analysis"""
     if not await check_auth(update):
@@ -200,22 +201,22 @@ async def heatmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mode = None
         if context.args:
             if context.args[0].lower() == 'all':
-                return await _heatmap_all(update, context)
+                # For 'all' mode, bypass cache and call directly
+                return await _heatmap_all_internal(update, context)
             elif context.args[0].lower() == 'elite':
                 mode = 'elite'
             else:
                 return "❌ Invalid mode. Usage: /heatmap [elite|all]"
         
-        # If no mode provided or mode is 'elite', use _heatmap_elite
-        return await _heatmap_elite(update, context)
+        # If no mode provided or mode is 'elite', use elite handler
+        return await _heatmap_elite_internal(update, context)
         
     except Exception as e:
         logger.error(f"Error in heatmap command: {e}")
         return "❌ Error occurred while analyzing alpha activity. Please try again later."
 
-@cache_command(expire_minutes=15)
-async def _heatmap_elite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Get heatmap analysis for elite traders only"""
+async def _heatmap_elite_internal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Internal function for elite heatmap analysis"""
     await update.message.reply_text("🔍 Analyzing alpha activity...\nPlease wait...")
     
     dune = DuneAnalytics()
@@ -230,8 +231,8 @@ async def _heatmap_elite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return message
 
 @cache_command(expire_minutes=15)
-async def _heatmap_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Get heatmap analysis for all traders"""
+async def _heatmap_all_internal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Internal function for all traders heatmap analysis"""
     await update.message.reply_text("🔍 Analyzing alpha activity...\nPlease wait...")
     
     dune = DuneAnalytics()
