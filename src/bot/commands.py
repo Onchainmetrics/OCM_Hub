@@ -20,9 +20,9 @@ FLOW_THRESHOLDS = {
         '24h': 2500
     },
     'all': {
-        '1h': 5000,
-        '4h': 7500,
-        '24h': 10000
+        '1h': 2000,
+        '4h': 3500,
+        '24h': 5000
     }
 }
 
@@ -288,8 +288,8 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     ]
     
     # Set thresholds based on mode
-    high_alpha_threshold = 2 if is_elite_mode else 10
-    medium_alpha_threshold = 1 if is_elite_mode else 5
+    high_alpha_threshold = 2 if is_elite_mode else 4
+    medium_alpha_threshold = 1 if is_elite_mode else 2
     
     mode = 'elite' if is_elite_mode else 'all'
     
