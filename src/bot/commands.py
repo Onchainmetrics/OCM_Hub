@@ -282,11 +282,26 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
     
     alpha_count = row['active_alphas']
     
-    # Format with copyable CA at the end
+    # Format average cost basis if available - optimized for small token prices
+    cost_basis_str = ""
+    if 'avg_cost_basis' in row and row['avg_cost_basis'] is not None:
+        cost_basis = float(row['avg_cost_basis'])
+        if cost_basis < 0.00001:  # Ultra small prices
+            cost_basis_str = f" | ${cost_basis:.8f}"
+        elif cost_basis < 0.0001:  # Very small prices
+            cost_basis_str = f" | ${cost_basis:.6f}"
+        elif cost_basis < 0.01:    # Small prices
+            cost_basis_str = f" | ${cost_basis:.4f}"
+        elif cost_basis < 1:       # Medium prices
+            cost_basis_str = f" | ${cost_basis:.3f}"
+        else:                      # Larger prices
+            cost_basis_str = f" | ${cost_basis:.2f}"
+    
+    # Format with copyable CA at the end and include cost basis
     return (
         f"⚡️ ${row['symbol']}: {flow_str} "
         f"({'🟢' if flow > 0 else '🔴'}) "
-        f"[{alpha_count}w] | "
+        f"[{alpha_count}w{cost_basis_str}] | "
         f"<code>{row['token_address']}</code>"
     )
 
