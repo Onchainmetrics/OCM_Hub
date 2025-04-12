@@ -336,11 +336,13 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     ]
     
     # Set thresholds based on mode
-    high_alpha_threshold = 2 if is_elite_mode else 10
-    medium_alpha_threshold = 1 if is_elite_mode else 5
+    # For elite mode: medium = 1 wallet, high = 2+ wallets (unchanged)
+    # For all mode: medium = 1-2 wallets, high = 3+ wallets (adjusted for new query)
+    high_alpha_threshold = 2 if is_elite_mode else 3
+    medium_alpha_threshold = 1  # Always show if at least 1 wallet
     mode = 'elite' if is_elite_mode else 'all'
     
-    # 1H Activity - Always use standard threshold
+    # 1H Activity
     active_1h_df = df.copy()
     message.append("⚡️ Live Alpha Activity (1H)")
     if not active_1h_df.empty:
@@ -359,7 +361,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     else:
         message.append("No immediate alpha activity")
     
-    # 4H Activity - Try standard threshold first, fall back to 1H threshold if no activity
+    # 4H Activity
     active_4h_df = df.copy()
     message.append("\n🔥 Recent Alpha Activity (4H)")
     if not active_4h_df.empty:
@@ -413,7 +415,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
                 ascending=[False, False]
             )
             
-            # High Alpha section (2+ alphas for elite, 10+ for all)
+            # High Alpha section (2+ alphas for elite, 3+ for all)
             high_alpha = sorted_df[sorted_df['active_alphas'] >= high_alpha_threshold]
             has_high_activity = False
             if not high_alpha.empty:
@@ -424,7 +426,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
                         has_high_activity = True
                         message.append(formatted)
             
-            # Medium Alpha section (1+ alpha for elite, 5+ for all)
+            # Medium Alpha section (1 alpha for elite, 1-2 for all)
             medium_alpha = sorted_df[
                 (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
                 (sorted_df['active_alphas'] < high_alpha_threshold)
