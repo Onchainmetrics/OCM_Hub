@@ -290,7 +290,7 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
             if isinstance(wallet, str):
                 wallet = wallet.strip()
                 short_wallet = f"{wallet[:4]}...{wallet[-4:]}"
-                gmgn_link = f"https://gmgn.io/wallet/{wallet}"
+                gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
                 wallet_links.append(f"<a href='{gmgn_link}'>{short_wallet}</a>")
         if wallet_links:
             wallet_str = f"\nWallets: {' | '.join(wallet_links)}"
