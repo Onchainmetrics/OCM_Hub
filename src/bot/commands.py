@@ -282,8 +282,8 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
         last_trade = pd.to_datetime(row['last_trade'])
         last_trade_str = f"\nLast Trade: {last_trade.strftime('%Y-%m-%d %H:%M')}"
     
-    # Get alpha count
-    alpha_count = row['active_alphas']  # Using the base column name from SQL
+    # Get alpha count (using the base column name from SQL)
+    alpha_count = row['active_alphas']
     
     # Add wallet list with GMGN links
     wallet_info = format_wallet_list(row['involved_wallets'], is_elite_mode) if 'involved_wallets' in row else ""
