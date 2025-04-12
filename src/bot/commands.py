@@ -246,9 +246,29 @@ async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Error testing alpha tracker: {e}")
         await update.message.reply_text("❌ Error testing alpha tracker")
 
-def format_token_info(row, timeframe='1h', is_elite_mode=False):
+# Primary flow thresholds
+FLOW_THRESHOLDS = {
+    'elite': {
+        '1h': 100,   # Show elite moves of $100+ in last hour
+        '4h': 500,   # Show elite moves of $500+ in last 4 hours
+        '24h': 1000  # Show elite moves of $1000+ in last 24 hours
+    },
+    'all': {
+        '1h': 500,    # Show moves of $500+ in last hour
+        '4h': 1000,   # Show moves of $1000+ in last 4 hours
+        '24h': 2000   # Show moves of $2000+ in last 24 hours
+    }
+}
+
+def format_token_info(row, timeframe='1h', is_elite_mode=False, override_threshold=None):
     flow = row[f'flow_{timeframe}']
     flow_abs = abs(flow)
+    
+    # Use override threshold if provided, otherwise use standard threshold
+    mode = 'elite' if is_elite_mode else 'all'
+    min_flow = override_threshold if override_threshold is not None else FLOW_THRESHOLDS[mode][timeframe]
+    if flow_abs < min_flow:
+        return None
     
     # Format dollar amount with K/M suffix
     if flow_abs >= 1_000_000:
@@ -295,7 +315,6 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
         if wallet_links:
             wallet_str = f"\nWallets: {' | '.join(wallet_links)}"
     
-    # Format with copyable CA at the end, include market cap, timestamp and wallets
     return (
         f"⚡️ ${row['symbol']}: {flow_str} "
         f"({'🟢' if flow > 0 else '🔴'}) "
@@ -319,8 +338,9 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     # Set thresholds based on mode
     high_alpha_threshold = 2 if is_elite_mode else 10
     medium_alpha_threshold = 1 if is_elite_mode else 5
+    mode = 'elite' if is_elite_mode else 'all'
     
-    # 1H Activity
+    # 1H Activity - Always use standard threshold
     active_1h_df = df.copy()
     message.append("⚡️ Live Alpha Activity (1H)")
     if not active_1h_df.empty:
@@ -328,14 +348,18 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
             by=['active_alphas', 'flow_1h'], 
             ascending=[False, False]
         ).head(10)
+        has_activity = False
         for _, row in sorted_1h.iterrows():
             formatted = format_token_info(row, '1h', is_elite_mode)
             if formatted:
+                has_activity = True
                 message.append(formatted)
+        if not has_activity:
+            message.append("No immediate alpha activity")
     else:
         message.append("No immediate alpha activity")
     
-    # 4H Activity
+    # 4H Activity - Try standard threshold first, fall back to 1H threshold if no activity
     active_4h_df = df.copy()
     message.append("\n🔥 Recent Alpha Activity (4H)")
     if not active_4h_df.empty:
@@ -343,14 +367,34 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
             by=['active_alphas', 'flow_4h'], 
             ascending=[False, False]
         ).head(10)
+        
+        # First try with standard 4h threshold
+        has_activity = False
         for _, row in sorted_4h.iterrows():
             formatted = format_token_info(row, '4h', is_elite_mode)
             if formatted:
+                if not has_activity:
+                    message.append("Using standard threshold:")
+                has_activity = True
                 message.append(formatted)
+        
+        # If no activity, fall back to 1h threshold
+        if not has_activity:
+            fallback_threshold = FLOW_THRESHOLDS[mode]['1h']
+            for _, row in sorted_4h.iterrows():
+                formatted = format_token_info(row, '4h', is_elite_mode, override_threshold=fallback_threshold)
+                if formatted:
+                    if not has_activity:
+                        message.append("Using relaxed threshold due to low activity:")
+                    has_activity = True
+                    message.append(formatted)
+            
+        if not has_activity:
+            message.append("No recent alpha activity")
     else:
         message.append("No recent alpha activity")
     
-    # 24H Activity
+    # 24H Activity - Try standard threshold first, fall back to 4h then 1h threshold if no activity
     active_24h_df = df.copy()
     if not active_24h_df.empty:
         message.append("\n📊 24H Alpha Activity")
@@ -360,26 +404,46 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
             ascending=[False, False]
         )
         
-        # High Alpha (2+ alphas for elite mode, 10+ for all mode)
-        high_alpha = sorted_df[sorted_df['active_alphas'] >= high_alpha_threshold]
-        if not high_alpha.empty:
-            message.append("\n🔥 High Alpha Interest:")
-            for _, row in high_alpha.head(10).iterrows():
-                formatted = format_token_info(row, '24h', is_elite_mode)
-                if formatted:
-                    message.append(formatted)
+        # Function to process high and medium alpha sections with given threshold
+        def process_alpha_sections(threshold_level):
+            has_any_activity = False
+            
+            # High Alpha section
+            high_alpha = sorted_df[sorted_df['active_alphas'] >= high_alpha_threshold]
+            if not high_alpha.empty:
+                message.append("\n🔥 High Alpha Interest:")
+                for _, row in high_alpha.head(10).iterrows():
+                    formatted = format_token_info(row, '24h', is_elite_mode, override_threshold=threshold_level)
+                    if formatted:
+                        has_any_activity = True
+                        message.append(formatted)
+            
+            # Medium Alpha section
+            medium_alpha = sorted_df[
+                (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
+                (sorted_df['active_alphas'] < high_alpha_threshold)
+            ]
+            if not medium_alpha.empty:
+                message.append("\n📈 Medium Alpha Interest:")
+                for _, row in medium_alpha.head(8).iterrows():
+                    formatted = format_token_info(row, '24h', is_elite_mode, override_threshold=threshold_level)
+                    if formatted:
+                        has_any_activity = True
+                        message.append(formatted)
+            
+            return has_any_activity
         
-        # Medium Alpha (1 alpha for elite mode, 5-9 for all mode)
-        medium_alpha = sorted_df[
-            (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
-            (sorted_df['active_alphas'] < high_alpha_threshold)
-        ]
-        if not medium_alpha.empty:
-            message.append("\n📈 Medium Alpha Interest:")
-            for _, row in medium_alpha.head(8).iterrows():
-                formatted = format_token_info(row, '24h', is_elite_mode)
-                if formatted:
-                    message.append(formatted)
+        # Try standard 24h threshold
+        if process_alpha_sections(FLOW_THRESHOLDS[mode]['24h']):
+            message.insert(-2, "Using standard threshold:")  # Insert before the sections
+        # Fall back to 4h threshold
+        elif process_alpha_sections(FLOW_THRESHOLDS[mode]['4h']):
+            message.insert(-2, "Using 4h threshold due to low activity:")
+        # Fall back to 1h threshold
+        elif process_alpha_sections(FLOW_THRESHOLDS[mode]['1h']):
+            message.insert(-2, "Using 1h threshold due to very low activity:")
+        else:
+            message.append("No significant alpha activity in the last 24h")
     
     return "\n".join(message)
 
