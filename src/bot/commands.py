@@ -282,8 +282,8 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
         last_trade = pd.to_datetime(row['last_trade'])
         last_trade_str = f"\nLast Trade: {last_trade.strftime('%Y-%m-%d %H:%M')}"
     
-    # Get alpha count based on timeframe
-    alpha_count = row[f'active_alphas_{timeframe}']
+    # Get alpha count
+    alpha_count = row['active_alphas']  # Using the base column name from SQL
     
     # Add wallet list with GMGN links
     wallet_info = format_wallet_list(row['involved_wallets'], is_elite_mode) if 'involved_wallets' in row else ""
@@ -312,14 +312,12 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     high_alpha_threshold = 2 if is_elite_mode else 4
     medium_alpha_threshold = 1 if is_elite_mode else 2
     
-    mode = 'elite' if is_elite_mode else 'all'
-    
     # 1H Activity
     active_1h_df = df.copy()
     message.append("⚡️ Live Alpha Activity (1H)")
     if not active_1h_df.empty:
         sorted_1h = active_1h_df.sort_values(
-            by=['active_alphas_1h', 'flow_1h'], 
+            by=['active_alphas', 'flow_1h'], 
             ascending=[False, False]
         ).head(10)
         has_activity = False
@@ -338,7 +336,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     message.append("\n🔥 Recent Alpha Activity (4H)")
     if not active_4h_df.empty:
         sorted_4h = active_4h_df.sort_values(
-            by=['active_alphas_4h', 'flow_4h'], 
+            by=['active_alphas', 'flow_4h'], 
             ascending=[False, False]
         ).head(10)
         has_activity = False
@@ -358,14 +356,14 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     
     if not active_24h_df.empty:
         sorted_df = active_24h_df.sort_values(
-            by=['active_alphas_24h', 'flow_24h'],
+            by=['active_alphas', 'flow_24h'],
             ascending=[False, False]
         )
         
         has_any_activity = False
         
         # High Alpha (2+ alphas for elite mode, 4+ for all mode)
-        high_alpha = sorted_df[sorted_df['active_alphas_24h'] >= high_alpha_threshold]
+        high_alpha = sorted_df[sorted_df['active_alphas'] >= high_alpha_threshold]
         if not high_alpha.empty:
             message.append("\n🔥 High Alpha Interest:")
             has_high_activity = False
@@ -380,8 +378,8 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
         
         # Medium Alpha (1 alpha for elite mode, 2-3 for all mode)
         medium_alpha = sorted_df[
-            (sorted_df['active_alphas_24h'] >= medium_alpha_threshold) & 
-            (sorted_df['active_alphas_24h'] < high_alpha_threshold)
+            (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
+            (sorted_df['active_alphas'] < high_alpha_threshold)
         ]
         if not medium_alpha.empty:
             message.append("\n📈 Medium Alpha Interest:")
