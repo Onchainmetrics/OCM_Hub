@@ -12,20 +12,6 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Flow thresholds for different modes and timeframes
-FLOW_THRESHOLDS = {
-    'elite': {
-        '1h': 1000,
-        '4h': 2000,
-        '24h': 2500
-    },
-    'all': {
-        '1h': 5000,
-        '4h': 7500,
-        '24h': 10000
-    }
-}
-
 async def check_auth(update: Update) -> bool:
     """Check if user is authorized to use the bot"""
     user_id = str(update.effective_user.id)
@@ -260,18 +246,31 @@ async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Error testing alpha tracker: {e}")
         await update.message.reply_text("❌ Error testing alpha tracker")
 
+def format_wallet_list(wallets, is_elite=False):
+    if not wallets:
+        return ""
+    
+    prefix = "🔷 Elite" if is_elite else "👥 Holders"
+    formatted_wallets = []
+    
+    # Take only first 3 wallets
+    for wallet in wallets[:3]:
+        # Create GMGN profile link but only show first 3 chars of wallet
+        gmgn_url = f"https://www.gmgn.ai/sol/address/{wallet}"
+        formatted_wallets.append(f"• <a href='{gmgn_url}'>{wallet[:3]}</a>")
+    
+    remaining = len(wallets) - 3 if len(wallets) > 3 else 0
+    
+    wallet_str = f"\n{prefix} ({len(wallets)}):\n" + "\n".join(formatted_wallets)
+    if remaining > 0:
+        wallet_str += f"\n  +{remaining} more..."
+    
+    return wallet_str
+
 def format_token_info(row, timeframe='1h', is_elite_mode=False):
     flow = row[f'flow_{timeframe}']
     flow_abs = abs(flow)
     
-    # Get minimum flow threshold from constants
-    mode = 'elite' if is_elite_mode else 'all'
-    min_flow = FLOW_THRESHOLDS[mode][timeframe]
-    
-    # Only show tokens with flow above threshold
-    if flow_abs < min_flow:
-        return None
-        
     # Format dollar amount with K/M suffix
     if flow_abs >= 1_000_000:
         flow_str = f"${flow_abs/1_000_000:.1f}M"
@@ -280,14 +279,36 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
     else:
         flow_str = f"${flow_abs:.0f}"
     
-    alpha_count = row['active_alphas']
+    # Format market cap
+    mcap = row['mcap']
+    if mcap >= 1_000_000_000:
+        mcap_str = f"${mcap/1_000_000_000:.1f}B"
+    elif mcap >= 1_000_000:
+        mcap_str = f"${mcap/1_000_000:.1f}M"
+    elif mcap >= 1000:
+        mcap_str = f"${mcap/1000:.1f}K"
+    else:
+        mcap_str = f"${mcap:.0f}"
     
-    # Format with copyable CA at the end
+    # Format timestamp
+    last_trade_str = ""
+    if 'last_trade' in row and pd.notna(row['last_trade']):
+        last_trade = pd.to_datetime(row['last_trade'])
+        last_trade_str = f"\nLast Trade: {last_trade.strftime('%Y-%m-%d %H:%M')}"
+    
+    # Get alpha count based on timeframe
+    alpha_count = row[f'active_alphas_{timeframe}']
+    
+    # Add wallet list with GMGN links
+    wallet_info = format_wallet_list(row['involved_wallets'], is_elite_mode) if 'involved_wallets' in row else ""
+    
     return (
         f"⚡️ ${row['symbol']}: {flow_str} "
         f"({'🟢' if flow > 0 else '🔴'}) "
-        f"[{alpha_count}w] | "
+        f"[{alpha_count}w | {mcap_str}] | "
         f"<code>{row['token_address']}</code>"
+        f"{last_trade_str}"
+        f"{wallet_info}"
     )
 
 async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
