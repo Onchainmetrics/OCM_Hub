@@ -268,11 +268,24 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
     
     alpha_count = row['active_alphas']
     
-    # Format with copyable CA at the end
+    # Format average market cap at entry if available
+    mcap_str = ""
+    if 'avg_mcap_at_entry' in row and row['avg_mcap_at_entry'] is not None:
+        mcap = float(row['avg_mcap_at_entry'])
+        if mcap >= 1_000_000_000:  # Billions
+            mcap_str = f" | MCap: ${mcap/1_000_000_000:.1f}B"
+        elif mcap >= 1_000_000:    # Millions
+            mcap_str = f" | MCap: ${mcap/1_000_000:.1f}M"
+        elif mcap >= 1000:         # Thousands
+            mcap_str = f" | MCap: ${mcap/1000:.0f}K"
+        else:
+            mcap_str = f" | MCap: ${mcap:.0f}"
+    
+    # Format with copyable CA at the end and include market cap
     return (
         f"⚡️ ${row['symbol']}: {flow_str} "
         f"({'🟢' if flow > 0 else '🔴'}) "
-        f"[{alpha_count}w] | "
+        f"[{alpha_count}w{mcap_str}] | "
         f"<code>{row['token_address']}</code>"
     )
 
