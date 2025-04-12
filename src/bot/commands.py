@@ -403,46 +403,44 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
         mode = 'elite' if is_elite_mode else 'all'
         flow_threshold = FLOW_THRESHOLDS[mode]['24h']
         
-        # Sort by alpha count and absolute 24h flow
-        sorted_df = active_24h_df.sort_values(
-            by=['active_alphas', 'flow_24h'],
-            ascending=[False, False]
-        )
+        # Filter for significant flows first, like in the old version
+        active_24h_df = active_24h_df[active_24h_df['flow_24h'].abs() >= flow_threshold].copy()
         
-        # High Alpha section (2+ alphas for elite, 10+ for all)
-        high_alpha_mask = (
-            (sorted_df['active_alphas'] >= high_alpha_threshold) & 
-            (sorted_df['flow_24h'].abs() >= flow_threshold)
-        )
-        high_alpha = sorted_df[high_alpha_mask]
-        
-        has_high_activity = False
-        if not high_alpha.empty:
-            message.append("\n🔥 High Alpha Interest:")
-            for _, row in high_alpha.head(10).iterrows():
-                formatted = format_token_info(row, '24h', is_elite_mode)
-                if formatted:
-                    has_high_activity = True
-                    message.append(formatted)
-        
-        # Medium Alpha section (1+ alpha for elite, 5+ for all)
-        medium_alpha_mask = (
-            (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
-            (sorted_df['active_alphas'] < high_alpha_threshold) &
-            (sorted_df['flow_24h'].abs() >= flow_threshold)
-        )
-        medium_alpha = sorted_df[medium_alpha_mask]
-        
-        has_medium_activity = False
-        if not medium_alpha.empty:
-            message.append("\n📈 Medium Alpha Interest:")
-            for _, row in medium_alpha.head(8).iterrows():
-                formatted = format_token_info(row, '24h', is_elite_mode)
-                if formatted:
-                    has_medium_activity = True
-                    message.append(formatted)
-        
-        if not (has_high_activity or has_medium_activity):
+        if not active_24h_df.empty:
+            # Sort by alpha count and flow
+            sorted_df = active_24h_df.sort_values(
+                by=['active_alphas', 'flow_24h'],
+                ascending=[False, False]
+            )
+            
+            # High Alpha section (2+ alphas for elite, 10+ for all)
+            high_alpha = sorted_df[sorted_df['active_alphas'] >= high_alpha_threshold]
+            has_high_activity = False
+            if not high_alpha.empty:
+                message.append("\n🔥 High Alpha Interest:")
+                for _, row in high_alpha.head(10).iterrows():
+                    formatted = format_token_info(row, '24h', is_elite_mode)
+                    if formatted:
+                        has_high_activity = True
+                        message.append(formatted)
+            
+            # Medium Alpha section (1+ alpha for elite, 5+ for all)
+            medium_alpha = sorted_df[
+                (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
+                (sorted_df['active_alphas'] < high_alpha_threshold)
+            ]
+            has_medium_activity = False
+            if not medium_alpha.empty:
+                message.append("\n📈 Medium Alpha Interest:")
+                for _, row in medium_alpha.head(8).iterrows():
+                    formatted = format_token_info(row, '24h', is_elite_mode)
+                    if formatted:
+                        has_medium_activity = True
+                        message.append(formatted)
+            
+            if not (has_high_activity or has_medium_activity):
+                message.append("No significant alpha activity in the last 24h")
+        else:
             message.append("No significant alpha activity in the last 24h")
     else:
         message.append("No significant alpha activity in the last 24h")
