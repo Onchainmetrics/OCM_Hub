@@ -295,12 +295,18 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
         else:
             mcap_str = f" | MCap: ${mcap:.0f}"
     
-    # Format with copyable CA at the end and include market cap
+    # Format timestamp
+    last_trade_str = ""
+    if 'last_trade' in row and row['last_trade'] is not None:
+        last_trade_str = f"\nLast Trade: {row['last_trade']}"
+    
+    # Format with copyable CA at the end, include market cap and timestamp
     return (
         f"⚡️ ${row['symbol']}: {flow_str} "
         f"({'🟢' if flow > 0 else '🔴'}) "
         f"[{alpha_count}w{mcap_str}] | "
         f"<code>{row['token_address']}</code>"
+        f"{last_trade_str}"
     )
 
 async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
