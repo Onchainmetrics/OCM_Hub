@@ -405,14 +405,14 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
         
         # Sort by alpha count and absolute 24h flow
         sorted_df = active_24h_df.sort_values(
-            by=['active_alphas', 'abs_flow_24h'],
+            by=['active_alphas', 'flow_24h'],
             ascending=[False, False]
         )
         
         # High Alpha section (2+ alphas for elite, 10+ for all)
         high_alpha_mask = (
             (sorted_df['active_alphas'] >= high_alpha_threshold) & 
-            (sorted_df['abs_flow_24h'].abs() >= flow_threshold)
+            (sorted_df['flow_24h'].abs() >= flow_threshold)
         )
         high_alpha = sorted_df[high_alpha_mask]
         
@@ -429,7 +429,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
         medium_alpha_mask = (
             (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
             (sorted_df['active_alphas'] < high_alpha_threshold) &
-            (sorted_df['abs_flow_24h'].abs() >= flow_threshold)
+            (sorted_df['flow_24h'].abs() >= flow_threshold)
         )
         medium_alpha = sorted_df[medium_alpha_mask]
         
