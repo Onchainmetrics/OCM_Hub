@@ -249,14 +249,14 @@ async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Primary flow thresholds
 FLOW_THRESHOLDS = {
     'elite': {
-        '1h': 100,   # Show elite moves of $100+ in last hour
+        '1h': 300,   # Show elite moves of $100+ in last hour
         '4h': 500,   # Show elite moves of $500+ in last 4 hours
         '24h': 1000  # Show elite moves of $1000+ in last 24 hours
     },
     'all': {
-        '1h': 500,    # Show moves of $500+ in last hour
-        '4h': 1000,   # Show moves of $1000+ in last 4 hours
-        '24h': 2000   # Show moves of $2000+ in last 24 hours
+        '1h': 2000,    # Show moves of $500+ in last hour
+        '4h': 2000,   # Show moves of $1000+ in last 4 hours
+        '24h': 5000   # Show moves of $2000+ in last 24 hours
     }
 }
 
@@ -315,6 +315,17 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False, override_thresho
         if wallet_links:
             wallet_str = f"\nWallets: {' | '.join(wallet_links)}"
     
+    # Format total held value
+    held_value_str = ""
+    if 'total_held_value' in row and row['total_held_value'] is not None:
+        held_value = float(row['total_held_value'])
+        if held_value >= 1_000_000:  # Millions
+            held_value_str = f"\nTotal Value Held: ${held_value/1_000_000:.1f}M"
+        elif held_value >= 1000:  # Thousands
+            held_value_str = f"\nTotal Value Held: ${held_value/1000:.1f}K"
+        else:
+            held_value_str = f"\nTotal Value Held: ${held_value:.0f}"
+    
     return (
         f"⚡️ ${row['symbol']}: {flow_str} "
         f"({'🟢' if flow > 0 else '🔴'}) "
@@ -322,6 +333,7 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False, override_thresho
         f"<code>{row['token_address']}</code>"
         f"{last_trade_str}"
         f"{wallet_str}"
+        f"{held_value_str}"
     )
 
 async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
@@ -336,16 +348,20 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     ]
     
     # Set thresholds based on mode
-    # For elite mode: medium = 1 wallet, high = 2+ wallets (unchanged)
-    # For all mode: medium = 1-2 wallets, high = 3+ wallets (adjusted for new query)
+    # For elite mode: medium = 1 wallet, high = 2+ wallets
+    # For all mode: medium = 2 wallets, high = 3+ wallets
     high_alpha_threshold = 2 if is_elite_mode else 3
-    medium_alpha_threshold = 1  # Always show if at least 1 wallet
+    medium_alpha_threshold = 1 if is_elite_mode else 2  # Adjusted: 1 for elite, 2 for all
     mode = 'elite' if is_elite_mode else 'all'
     
     # 1H Activity
     active_1h_df = df.copy()
     message.append("⚡️ Live Alpha Activity (1H)")
     if not active_1h_df.empty:
+        # For 'all' mode, filter out single wallet activity
+        if not is_elite_mode:
+            active_1h_df = active_1h_df[active_1h_df['active_alphas'] >= 2]
+            
         sorted_1h = active_1h_df.sort_values(
             by=['active_alphas', 'flow_1h'], 
             ascending=[False, False]
@@ -365,6 +381,10 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     active_4h_df = df.copy()
     message.append("\n🔥 Recent Alpha Activity (4H)")
     if not active_4h_df.empty:
+        # For 'all' mode, filter out single wallet activity
+        if not is_elite_mode:
+            active_4h_df = active_4h_df[active_4h_df['active_alphas'] >= 2]
+            
         sorted_4h = active_4h_df.sort_values(
             by=['active_alphas', 'flow_4h'], 
             ascending=[False, False]
@@ -401,11 +421,15 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     message.append("\n📊 24H Alpha Activity")
     
     if not active_24h_df.empty:
+        # For 'all' mode, filter out single wallet activity
+        if not is_elite_mode:
+            active_24h_df = active_24h_df[active_24h_df['active_alphas'] >= 2]
+            
         # Get the appropriate flow threshold based on mode
         mode = 'elite' if is_elite_mode else 'all'
         flow_threshold = FLOW_THRESHOLDS[mode]['24h']
         
-        # Filter for significant flows first, like in the old version
+        # Filter for significant flows first
         active_24h_df = active_24h_df[active_24h_df['flow_24h'].abs() >= flow_threshold].copy()
         
         if not active_24h_df.empty:
@@ -426,7 +450,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
                         has_high_activity = True
                         message.append(formatted)
             
-            # Medium Alpha section (1 alpha for elite, 1-2 for all)
+            # Medium Alpha section (1 alpha for elite, 2 for all)
             medium_alpha = sorted_df[
                 (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
                 (sorted_df['active_alphas'] < high_alpha_threshold)
