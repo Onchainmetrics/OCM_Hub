@@ -12,20 +12,6 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Flow thresholds for different modes and timeframes
-FLOW_THRESHOLDS = {
-    'elite': {
-        '1h': 1000,
-        '4h': 2000,
-        '24h': 2500
-    },
-    'all': {
-        '1h': 5000,
-        '4h': 7500,
-        '24h': 10000
-    }
-}
-
 async def check_auth(update: Update) -> bool:
     """Check if user is authorized to use the bot"""
     user_id = str(update.effective_user.id)
@@ -264,14 +250,6 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
     flow = row[f'flow_{timeframe}']
     flow_abs = abs(flow)
     
-    # Get minimum flow threshold from constants
-    mode = 'elite' if is_elite_mode else 'all'
-    min_flow = FLOW_THRESHOLDS[mode][timeframe]
-    
-    # Only show tokens with flow above threshold
-    if flow_abs < min_flow:
-        return None
-        
     # Format dollar amount with K/M suffix
     if flow_abs >= 1_000_000:
         flow_str = f"${flow_abs/1_000_000:.1f}M"
@@ -300,13 +278,26 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
     if 'last_trade' in row and row['last_trade'] is not None:
         last_trade_str = f"\nLast Trade: {row['last_trade']}"
     
-    # Format with copyable CA at the end, include market cap and timestamp
+    # Format wallet list with GMGN links
+    wallet_str = ""
+    if 'involved_wallets' in row and row['involved_wallets']:
+        wallets = row['involved_wallets'].split(',')
+        wallet_links = []
+        for wallet in wallets:
+            wallet = wallet.strip()
+            short_wallet = f"{wallet[:4]}...{wallet[-4:]}"
+            gmgn_link = f"https://gmgn.io/wallet/{wallet}"
+            wallet_links.append(f"<a href='{gmgn_link}'>{short_wallet}</a>")
+        wallet_str = f"\nWallets: {' | '.join(wallet_links)}"
+    
+    # Format with copyable CA at the end, include market cap, timestamp and wallets
     return (
         f"⚡️ ${row['symbol']}: {flow_str} "
         f"({'🟢' if flow > 0 else '🔴'}) "
         f"[{alpha_count}w{mcap_str}] | "
         f"<code>{row['token_address']}</code>"
         f"{last_trade_str}"
+        f"{wallet_str}"
     )
 
 async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
@@ -324,11 +315,8 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     high_alpha_threshold = 2 if is_elite_mode else 10
     medium_alpha_threshold = 1 if is_elite_mode else 5
     
-    mode = 'elite' if is_elite_mode else 'all'
-    
     # 1H Activity
-    min_flow_1h = FLOW_THRESHOLDS[mode]['1h']
-    active_1h_df = df[df['flow_1h'].abs() >= min_flow_1h].copy()
+    active_1h_df = df.copy()
     message.append("⚡️ Live Alpha Activity (1H)")
     if not active_1h_df.empty:
         sorted_1h = active_1h_df.sort_values(
@@ -343,8 +331,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
         message.append("No immediate alpha activity")
     
     # 4H Activity
-    min_flow_4h = FLOW_THRESHOLDS[mode]['4h']
-    active_4h_df = df[df['flow_4h'].abs() >= min_flow_4h].copy()
+    active_4h_df = df.copy()
     message.append("\n🔥 Recent Alpha Activity (4H)")
     if not active_4h_df.empty:
         sorted_4h = active_4h_df.sort_values(
@@ -359,8 +346,7 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
         message.append("No recent alpha activity")
     
     # 24H Activity
-    min_flow_24h = FLOW_THRESHOLDS[mode]['24h']
-    active_24h_df = df[df['flow_24h'].abs() >= min_flow_24h].copy()
+    active_24h_df = df.copy()
     if not active_24h_df.empty:
         message.append("\n📊 24H Alpha Activity")
         
