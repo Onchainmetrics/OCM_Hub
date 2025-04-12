@@ -281,14 +281,19 @@ def format_token_info(row, timeframe='1h', is_elite_mode=False):
     # Format wallet list with GMGN links
     wallet_str = ""
     if 'involved_wallets' in row and row['involved_wallets']:
-        wallets = row['involved_wallets'].split(',')
+        wallets = row['involved_wallets']
+        # Handle both string (comma-separated) and list formats
+        if isinstance(wallets, str):
+            wallets = wallets.split(',')
         wallet_links = []
         for wallet in wallets:
-            wallet = wallet.strip()
-            short_wallet = f"{wallet[:4]}...{wallet[-4:]}"
-            gmgn_link = f"https://gmgn.io/wallet/{wallet}"
-            wallet_links.append(f"<a href='{gmgn_link}'>{short_wallet}</a>")
-        wallet_str = f"\nWallets: {' | '.join(wallet_links)}"
+            if isinstance(wallet, str):
+                wallet = wallet.strip()
+                short_wallet = f"{wallet[:4]}...{wallet[-4:]}"
+                gmgn_link = f"https://gmgn.io/wallet/{wallet}"
+                wallet_links.append(f"<a href='{gmgn_link}'>{short_wallet}</a>")
+        if wallet_links:
+            wallet_str = f"\nWallets: {' | '.join(wallet_links)}"
     
     # Format with copyable CA at the end, include market cap, timestamp and wallets
     return (
