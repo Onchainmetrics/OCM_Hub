@@ -59,7 +59,7 @@ class DuneAnalytics:
                 None, 
                 lambda: self.client.run_query(
                     query=query,
-                    performance="medium" 
+                    performance="large"
                 )
             )
             return pd.DataFrame(results.result.rows)
