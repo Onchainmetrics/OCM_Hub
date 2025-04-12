@@ -20,6 +20,10 @@ def create_whale_flow_chart(df: pd.DataFrame, token_symbol: str) -> tuple[str, i
         'usd_value': 'total_value'
     })
     
+    # Force EXITED flows to be negative
+    whale_summary.loc[whale_summary['behavior_pattern'] == 'EXITED', 'flow_90d'] = \
+        -abs(whale_summary.loc[whale_summary['behavior_pattern'] == 'EXITED', 'flow_90d'])
+    
     # Calculate average flow per wallet
     whale_summary['avg_flow_per_wallet'] = whale_summary['flow_90d'] / whale_summary['wallet_count']
     
