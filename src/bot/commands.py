@@ -249,14 +249,10 @@ async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Primary flow thresholds
 FLOW_THRESHOLDS = {
     'elite': {
-        '1h': 300,   # Show elite moves of $100+ in last hour
-        '4h': 500,   # Show elite moves of $500+ in last 4 hours
-        '24h': 1000  # Show elite moves of $1000+ in last 24 hours
+        '24h': 1000  # Base threshold for 24h flows
     },
     'all': {
-        '1h': 2000,    # Show moves of $500+ in last hour
-        '4h': 2000,   # Show moves of $1000+ in last 4 hours
-        '24h': 5000   # Show moves of $2000+ in last 24 hours
+        '24h': 5000  # Higher threshold for all traders
     }
 }
 
@@ -348,125 +344,51 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     ]
     
     # Set thresholds based on mode
-    # For elite mode: medium = 1 wallet, high = 2+ wallets
-    # For all mode: medium = 2 wallets, high = 3+ wallets
-    high_alpha_threshold = 2 if is_elite_mode else 3
-    medium_alpha_threshold = 1 if is_elite_mode else 2  # Adjusted: 1 for elite, 2 for all
+    # Elite mode: medium = 2 wallets, high = 3+ wallets
+    # All mode: medium = 3-4 wallets, high = 5+ wallets
+    high_alpha_threshold = 3 if is_elite_mode else 5
+    medium_alpha_threshold = 2 if is_elite_mode else 3
     mode = 'elite' if is_elite_mode else 'all'
     
-    # 1H Activity
-    active_1h_df = df.copy()
-    message.append("⚡️ Live Alpha Activity (1H)")
-    if not active_1h_df.empty:
-        # For 'all' mode, filter out single wallet activity
-        if not is_elite_mode:
-            active_1h_df = active_1h_df[active_1h_df['active_alphas'] >= 2]
-            
-        sorted_1h = active_1h_df.sort_values(
-            by=['active_alphas', 'flow_1h'], 
-            ascending=[False, False]
-        ).head(10)
-        has_activity = False
-        for _, row in sorted_1h.iterrows():
-            formatted = format_token_info(row, '1h', is_elite_mode)
-            if formatted:
-                has_activity = True
-                message.append(formatted)
-        if not has_activity:
-            message.append("No immediate alpha activity")
-    else:
-        message.append("No immediate alpha activity")
+    # Filter and sort the dataframe
+    active_df = df.copy()
     
-    # 4H Activity
-    active_4h_df = df.copy()
-    message.append("\n🔥 Recent Alpha Activity (4H)")
-    if not active_4h_df.empty:
-        # For 'all' mode, filter out single wallet activity
-        if not is_elite_mode:
-            active_4h_df = active_4h_df[active_4h_df['active_alphas'] >= 2]
-            
-        sorted_4h = active_4h_df.sort_values(
-            by=['active_alphas', 'flow_4h'], 
+    # Apply minimum wallet threshold based on mode
+    active_df = active_df[active_df['active_alphas'] >= medium_alpha_threshold]
+    
+    if not active_df.empty:
+        # Sort by number of wallets first, then by total 24h flow
+        sorted_df = active_df.sort_values(
+            by=['active_alphas', 'flow_24h'],
             ascending=[False, False]
-        ).head(10)
+        )
         
-        # First try with standard 4h threshold
-        has_activity = False
-        for _, row in sorted_4h.iterrows():
-            formatted = format_token_info(row, '4h', is_elite_mode)
-            if formatted:
-                if not has_activity:
-                    message.append("Using standard threshold:")
-                has_activity = True
-                message.append(formatted)
-        
-        # If no activity, fall back to 1h threshold
-        if not has_activity:
-            fallback_threshold = FLOW_THRESHOLDS[mode]['1h']
-            for _, row in sorted_4h.iterrows():
-                formatted = format_token_info(row, '4h', is_elite_mode, override_threshold=fallback_threshold)
+        # High Alpha section
+        high_alpha = sorted_df[sorted_df['active_alphas'] >= high_alpha_threshold]
+        has_high_activity = False
+        if not high_alpha.empty:
+            message.append("🔥 High Alpha Interest:")
+            for _, row in high_alpha.iterrows():
+                formatted = format_token_info(row, '24h', is_elite_mode)
                 if formatted:
-                    if not has_activity:
-                        message.append("Using relaxed threshold due to low activity:")
-                    has_activity = True
+                    has_high_activity = True
                     message.append(formatted)
-            
-        if not has_activity:
-            message.append("No recent alpha activity")
-    else:
-        message.append("No recent alpha activity")
-    
-    # 24H Activity
-    active_24h_df = df.copy()
-    message.append("\n📊 24H Alpha Activity")
-    
-    if not active_24h_df.empty:
-        # For 'all' mode, filter out single wallet activity
-        if not is_elite_mode:
-            active_24h_df = active_24h_df[active_24h_df['active_alphas'] >= 2]
-            
-        # Get the appropriate flow threshold based on mode
-        mode = 'elite' if is_elite_mode else 'all'
-        flow_threshold = FLOW_THRESHOLDS[mode]['24h']
         
-        # Filter for significant flows first
-        active_24h_df = active_24h_df[active_24h_df['flow_24h'].abs() >= flow_threshold].copy()
+        # Medium Alpha section
+        medium_alpha = sorted_df[
+            (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
+            (sorted_df['active_alphas'] < high_alpha_threshold)
+        ]
+        has_medium_activity = False
+        if not medium_alpha.empty:
+            message.append("\n📈 Medium Alpha Interest:")
+            for _, row in medium_alpha.iterrows():
+                formatted = format_token_info(row, '24h', is_elite_mode)
+                if formatted:
+                    has_medium_activity = True
+                    message.append(formatted)
         
-        if not active_24h_df.empty:
-            # Sort by alpha count and flow
-            sorted_df = active_24h_df.sort_values(
-                by=['active_alphas', 'flow_24h'],
-                ascending=[False, False]
-            )
-            
-            # High Alpha section (2+ alphas for elite, 3+ for all)
-            high_alpha = sorted_df[sorted_df['active_alphas'] >= high_alpha_threshold]
-            has_high_activity = False
-            if not high_alpha.empty:
-                message.append("\n🔥 High Alpha Interest:")
-                for _, row in high_alpha.head(10).iterrows():
-                    formatted = format_token_info(row, '24h', is_elite_mode)
-                    if formatted:
-                        has_high_activity = True
-                        message.append(formatted)
-            
-            # Medium Alpha section (1 alpha for elite, 2 for all)
-            medium_alpha = sorted_df[
-                (sorted_df['active_alphas'] >= medium_alpha_threshold) & 
-                (sorted_df['active_alphas'] < high_alpha_threshold)
-            ]
-            has_medium_activity = False
-            if not medium_alpha.empty:
-                message.append("\n📈 Medium Alpha Interest:")
-                for _, row in medium_alpha.head(8).iterrows():
-                    formatted = format_token_info(row, '24h', is_elite_mode)
-                    if formatted:
-                        has_medium_activity = True
-                        message.append(formatted)
-            
-            if not (has_high_activity or has_medium_activity):
-                message.append("No significant alpha activity in the last 24h")
-        else:
+        if not (has_high_activity or has_medium_activity):
             message.append("No significant alpha activity in the last 24h")
     else:
         message.append("No significant alpha activity in the last 24h")
