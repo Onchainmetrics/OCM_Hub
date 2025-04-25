@@ -426,16 +426,36 @@ help_text = (
     "- Use 'all' to include all traders\n\n"
     "/testalpha\n"
     "- Test alpha tracker functionality\n\n"
+    "/test_notifications\n"
+    "- Test notification channel connectivity\n\n"
     "/help\n"
     "- Show this help message"
 )
 
 def register_commands(application: Application) -> None:
     """Register all commands with the application."""
-    # ... existing code ...
-    
-    # Add test notification command
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("whales", whales_command))
+    application.add_handler(CommandHandler("heatmap", heatmap_command))
+    application.add_handler(CommandHandler("testalpha", test_alpha_command))
     application.add_handler(CommandHandler("test_notifications", test_notifications))
-    
-    # ... rest of existing code ...
+
+    # Update help text
+    global help_text
+    help_text = (
+        "🤖 CA Scanner Bot Commands:\n\n"
+        "/whales <contract_address>\n"
+        "- Get detailed whale analysis for a token\n\n"
+        "/heatmap [elite|all]\n"
+        "- View live alpha wallet activity\n"
+        "- Use 'elite' for elite traders only (default)\n"
+        "- Use 'all' to include all traders\n\n"
+        "/testalpha\n"
+        "- Test alpha tracker functionality\n\n"
+        "/test_notifications\n"
+        "- Test notification channel connectivity\n\n"
+        "/help\n"
+        "- Show this help message"
+    )
 
