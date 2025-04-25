@@ -3,6 +3,8 @@ import logging
 from telegram.ext import Application
 from src.bot.handlers import register_handlers
 from telegram import BotCommand
+from src.services.alpha_tracker import AlphaTracker
+from src.dune.client import DuneAnalytics
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +18,19 @@ class TelegramBot:
         # Initialize the application
         self.application = Application.builder().token(self.token).build()
         
+        # Initialize services
+        dune_client = DuneAnalytics()
+        alpha_tracker = AlphaTracker(dune_client)
+        self.application.bot_data['alpha_tracker'] = alpha_tracker
+        
         # Set up commands with descriptions
         commands = [
             BotCommand("start", "Start the bot"),
             BotCommand("help", "Show help message"),
             BotCommand("whales", "Get whale analysis for a token"),
             BotCommand("heatmap", "Track alpha wallet flows [elite|all]"),
-            BotCommand("testalpha", "Test alpha tracker functionality")
+            BotCommand("testalpha", "Test alpha tracker functionality"),
+            BotCommand("test_notifications", "Test notification channel")
         ]
         
         # Register command handlers
