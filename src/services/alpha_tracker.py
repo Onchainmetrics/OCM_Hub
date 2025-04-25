@@ -9,6 +9,9 @@ import aiohttp
 import os
 from dotenv import load_dotenv
 from collections import defaultdict
+from telegram import Bot
+from src.config.config import TELEGRAM_TOKEN, NOTIFICATION_CHANNEL_ID, YOUR_WEBHOOK_URL
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,10 @@ class AlphaTracker:
         self.HELIUS_API_KEY = os.getenv('HELIUS_API_KEY')
         self.WEBHOOK_ID = os.getenv('HELIUS_WEBHOOK_ID')
         self.pattern_detector = None
+        self.bot = Bot(TELEGRAM_TOKEN)
+        # Rate limiting
+        self.last_notification = {}  # {wallet_address: timestamp}
+        self.MIN_NOTIFICATION_INTERVAL = 3  # seconds, very short to allow for hot market conditions
         
     async def get_current_webhook(self) -> List[str]:
         """Get current webhook configuration"""
@@ -112,7 +119,7 @@ class AlphaTracker:
             }
             
             update_data = {
-                "webhookURL": "YOUR_WEBHOOK_URL",  # We need to add this to .env
+                "webhookURL": YOUR_WEBHOOK_URL,  # Using config value
                 "transactionTypes": ["SWAP"],
                 "accountAddresses": addresses,
                 "webhookType": "enhanced"
@@ -149,39 +156,75 @@ class AlphaTracker:
             emoji = "🟢" if is_buy else "🔴"
             action = "BUY" if is_buy else "SELL"
             
-            # Format token info
-            token_symbol = swap_data['token_symbol']
-            project = swap_data['project']  # e.g., "Raydium", "Orca"
+            # Format wallet info with GMGN link
+            wallet = swap_data['wallet_address']
+            wallet_short = f"{wallet[:6]}..."
+            gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
+            wallet_linked = f"<a href='{gmgn_link}'>{wallet_short}</a>"
             
-            # Format wallet info
-            wallet_address = swap_data['wallet_address']
-            solscan_link = f"https://solscan.io/account/{wallet_address}"
+            # Format marketcap
+            mcap_str = ""
+            if 'market_cap' in swap_data and swap_data['market_cap'] > 0:
+                mcap = swap_data['market_cap']
+                if mcap >= 1_000_000:  # $1M+
+                    mcap_str = f" | MCap: ${mcap/1_000_000:.1f}M"
+                else:  # Less than $1M
+                    mcap_str = f" | MCap: ${mcap/1000:.1f}K"
             
-            # Format amounts
-            sol_amount = swap_data['sol_amount']
-            token_amount = swap_data['token_amount']
-            usd_value = swap_data['usd_value']
-            price = swap_data['price']
+            # Basic swap info
+            message = [
+                f"{emoji} {action} {swap_data['token_symbol']} on {swap_data['project']}{mcap_str}",
+                f"👤 {wallet_linked}",
+                "",  # Empty line for spacing
+                f"🔹 {wallet_linked} swapped {swap_data['token_amount']:,.2f} "
+                f"(${swap_data['usd_value']:,.2f}) {swap_data['token_symbol']} "
+                f"for {swap_data['sol_amount']:.2f} SOL @{swap_data['price']:.6f}",
+                "",  # Empty line for spacing,
+                f"<code>{swap_data['token_address']}</code>"
+            ]
             
-            # Format holdings
-            total_holdings = swap_data['total_holdings']
+            return "\n".join(message)
             
-            # Contract address
-            contract_address = swap_data['token_address']
-            
-            message = (
-                f"{emoji} {action} {token_symbol} on {project}\n\n"
-                f"<a href='{solscan_link}'>{wallet_address[:6]}...{wallet_address[-4:]}</a>\n"
-                f"🔄 {sol_amount:.3f} SOL ↔️ {token_amount:,.0f} {token_symbol}\n"
-                f"💵 ${usd_value:,.2f} (${price:.4f})\n\n"
-                f"💰 Holds: {total_holdings:,.0f} {token_symbol}\n\n"
-                f"<code>{contract_address}</code>"
-            )
-            
-            return message
         except Exception as e:
             logger.error(f"Error formatting swap notification: {e}")
             return "Error formatting swap notification"
+
+    async def send_to_notification_channel(self, message: str):
+        """Send a message to the notification channel"""
+        try:
+            await self.bot.send_message(
+                chat_id=NOTIFICATION_CHANNEL_ID,
+                text=message,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            logger.error(f"Error sending to notification channel: {e}")
+
+    async def should_send_notification(self, wallet_address: str) -> bool:
+        """Check if we should send a notification for this wallet"""
+        now = time.time()
+        if wallet_address in self.last_notification:
+            if now - self.last_notification[wallet_address] < self.MIN_NOTIFICATION_INTERVAL:
+                logger.debug(f"Rate limiting notification for wallet {wallet_address}")
+                return False
+        self.last_notification[wallet_address] = now
+        return True
+
+    async def test_notification_channel(self):
+        """Test notification channel connectivity"""
+        try:
+            test_message = (
+                "🔔 Notification Channel Test\n\n"
+                "If you see this message, the alpha swap notification system is working correctly.\n"
+                f"Channel ID: {NOTIFICATION_CHANNEL_ID}\n"
+                f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            )
+            await self.send_to_notification_channel(test_message)
+            return True
+        except Exception as e:
+            logger.error(f"Notification channel test failed: {e}")
+            return False
 
     async def handle_webhook(self, webhook_data: dict):
         """Handle incoming webhook data"""
@@ -191,23 +234,68 @@ class AlphaTracker:
                 self.pattern_detector = PatternDetector(self.trader_profiles)
             
             # Process the webhook data
-            swap_data = self.parse_helius_webhook(webhook_data)
+            swap_data = await self.parse_helius_webhook(webhook_data)
             
-            # Check for patterns
-            patterns = self.pattern_detector.add_transaction(swap_data)
+            # Check rate limiting
+            if not await self.should_send_notification(swap_data['wallet_address']):
+                return
             
             # Format basic swap notification
             message = await self.format_swap_notification(swap_data)
+            
+            # Check for patterns
+            patterns = self.pattern_detector.add_transaction(swap_data)
             
             # Add pattern alerts if any
             if patterns:
                 message += "\n\n🔍 Pattern Detected:\n" + "\n".join(patterns)
             
-            # Send to Telegram
-            await self.send_to_telegram(message)
+            # Send to notification channel
+            await self.send_to_notification_channel(message)
             
         except Exception as e:
             logger.error(f"Error handling webhook: {e}")
+
+    async def parse_helius_webhook(self, webhook_data: dict) -> dict:
+        """Parse Helius webhook data into swap notification format"""
+        try:
+            # Extract basic transaction info
+            tx = webhook_data['transaction']
+            
+            # Determine if buy or sell
+            is_buy = tx['type'] == 'BUY'  # Assuming Helius provides this
+            
+            # Extract token info
+            token_data = tx['token']
+            token_address = token_data['address']
+            token_symbol = token_data.get('symbol', 'UNKNOWN')
+            
+            # Extract amounts
+            sol_amount = float(tx['amount'])  # Amount in SOL
+            token_amount = float(tx['tokenAmount'])
+            usd_value = float(tx.get('usdValue', 0))
+            
+            # Calculate price and marketcap (assuming 1B supply)
+            price = usd_value / token_amount if token_amount > 0 else 0
+            TOTAL_SUPPLY = 1_000_000_000  # 1B tokens
+            market_cap = price * TOTAL_SUPPLY
+            
+            return {
+                'is_buy': is_buy,
+                'wallet_address': tx['accountAddress'],
+                'token_address': token_address,
+                'token_symbol': token_symbol,
+                'sol_amount': sol_amount,
+                'token_amount': token_amount,
+                'usd_value': usd_value,
+                'price': price,
+                'market_cap': market_cap,
+                'project': tx.get('source', 'Unknown DEX')
+            }
+            
+        except Exception as e:
+            logger.error(f"Error parsing webhook data: {e}")
+            raise
 
 class PatternDetector:
     def __init__(self, trader_profiles: Dict[str, dict]):

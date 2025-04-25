@@ -246,6 +246,18 @@ async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Error testing alpha tracker: {e}")
         await update.message.reply_text("❌ Error testing alpha tracker")
 
+async def test_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Test the notification channel connectivity"""
+    try:
+        success = await context.bot_data['alpha_tracker'].test_notification_channel()
+        if success:
+            await update.message.reply_text("✅ Notification channel test successful! Check the notification channel for a test message.")
+        else:
+            await update.message.reply_text("❌ Notification channel test failed. Please check logs for details.")
+    except Exception as e:
+        logger.error(f"Error testing notification channel: {e}")
+        await update.message.reply_text("❌ Error testing notification channel. Please check logs for details.")
+
 # Primary flow thresholds
 FLOW_THRESHOLDS = {
     'elite': {
@@ -417,4 +429,13 @@ help_text = (
     "/help\n"
     "- Show this help message"
 )
+
+def register_commands(application: Application) -> None:
+    """Register all commands with the application."""
+    # ... existing code ...
+    
+    # Add test notification command
+    application.add_handler(CommandHandler("test_notifications", test_notifications))
+    
+    # ... rest of existing code ...
 
