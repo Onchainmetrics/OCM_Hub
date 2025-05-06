@@ -430,15 +430,39 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             short_wallet = f"{wallet[:3]}...{wallet[-3:]}"
             gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
             wallet_html = f"<a href='{gmgn_link}'>{short_wallet}</a>"
-            # Compose line with all columns
+            # Format usd_balance, bought, sold as $K
+            def fmt_k(val):
+                try:
+                    v = float(val)
+                    if abs(v) >= 1000:
+                        return f"${v/1000:.1f}K"
+                    else:
+                        return f"${v:.0f}"
+                except Exception:
+                    return str(val)
+            usd_balance = fmt_k(row.get('usd_balance', 'N/A'))
+            bought = fmt_k(row.get('total_bought', 'N/A'))
+            sold = fmt_k(row.get('total_sold', 'N/A'))
+            # Format avg_mcap 
+            avg_mcap = row.get('average_cost_basis_mcap', None)
+            mcap_str = ""
+            if avg_mcap is not None:
+                try:
+                    mcap = float(avg_mcap)
+                    if mcap >= 1_000_000_000:
+                        mcap_str = f" | MCap: ${mcap/1_000_000_000:.1f}B"
+                    elif mcap >= 1_000_000:
+                        mcap_str = f" | MCap: ${mcap/1_000_000:.1f}M"
+                    elif mcap >= 1000:
+                        mcap_str = f" | MCap: ${mcap/1000:.0f}K"
+                    else:
+                        mcap_str = f" | MCap: ${mcap:.0f}"
+                except Exception:
+                    pass
+            # Compose line with all columns (no trader type)
             line = (
-                f"{wallet_html} | "
-                f"usd_balance: {row.get('usd_balance', 'N/A')} | "
-                f"%owned: {row.get('percentage_owned', 'N/A')} | "
-                f"type: {row.get('trader_type', 'N/A')} | "
-                f"avg_mcap: {row.get('average_cost_basis_mcap', 'N/A')} | "
-                f"bought: {row.get('total_bought', 'N/A')} | "
-                f"sold: {row.get('total_sold', 'N/A')}"
+                f"{wallet_html} | usd_balance: {usd_balance} | %owned: {row.get('percentage_owned', 'N/A')} | "
+                f"bought: {bought} | sold: {sold}{mcap_str}"
             )
             lines.append(line)
         message = "\n".join(lines)
