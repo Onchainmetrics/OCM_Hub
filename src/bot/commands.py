@@ -425,25 +425,29 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return "❌ No alpha wallets currently holding this token."
         # Format output: one line per wallet, all columns, wallet as gmgn link (first 3...last 3 chars)
         lines = []
+        def fmt_dollar(val):
+            try:
+                v = float(val)
+                if abs(v) >= 1_000_000:
+                    return f"${v/1_000_000:.2f}M"
+                elif abs(v) >= 1_000:
+                    return f"${v/1_000:.2f}K"
+                else:
+                    return f"${v:.0f}"
+            except Exception:
+                return str(val)
         for _, row in df.iterrows():
             wallet = str(row['wallet'])
             short_wallet = f"{wallet[:3]}...{wallet[-3:]}"
             gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
             wallet_html = f"<a href='{gmgn_link}'>{short_wallet}</a>"
-            # Format usd_balance, bought, sold as $K
-            def fmt_k(val):
-                try:
-                    v = float(val)
-                    if abs(v) >= 1000:
-                        return f"${v/1000:.1f}K"
-                    else:
-                        return f"${v:.0f}"
-                except Exception:
-                    return str(val)
-            usd_balance = fmt_k(row.get('usd_balance', 'N/A'))
-            bought = fmt_k(row.get('total_bought', 'N/A'))
-            sold = fmt_k(row.get('total_sold', 'N/A'))
-            # Format avg_mcap 
+            # Format usd_balance, bought, sold as $K/$M
+            usd_balance = fmt_dollar(row.get('usd_balance', 'N/A'))
+            bought_raw = row.get('total_bought', 0)
+            sold_raw = row.get('total_sold', 0)
+            bought = fmt_dollar(bought_raw)
+            sold = fmt_dollar(sold_raw)
+            # Format avg_mcap as in heatmap
             avg_mcap = row.get('average_cost_basis_mcap', None)
             mcap_str = ""
             if avg_mcap is not None:
@@ -459,10 +463,25 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         mcap_str = f" | MCap: ${mcap:.0f}"
                 except Exception:
                     pass
+            # Format %owned
+            pct_owned = row.get('percentage_owned', 0)
+            try:
+                pct_owned = round(float(pct_owned) + 1e-8, 2)  # round up on .005
+                pct_owned_str = f"{pct_owned:.2f}%"
+            except Exception:
+                pct_owned_str = str(pct_owned)
+            # Calculate uPNL: usd_balance + total_sold - total_bought
+            try:
+                upnl_val = float(row.get('usd_balance', 0)) + float(sold_raw) - float(bought_raw)
+                upnl_str = fmt_dollar(upnl_val)
+                upnl_emoji = '🟢' if upnl_val >= 0 else '🔴'
+                upnl_col = f"uPNL: {upnl_emoji} {upnl_str}"
+            except Exception:
+                upnl_col = "uPNL: N/A"
             # Compose line with all columns (no trader type)
             line = (
-                f"{wallet_html} | usd_balance: {usd_balance} | %owned: {row.get('percentage_owned', 'N/A')} | "
-                f"bought: {bought} | sold: {sold}{mcap_str}"
+                f"{wallet_html} | usd_balance: {usd_balance} | %owned: {pct_owned_str} | "
+                f"bought: {bought} | sold: {sold} | {upnl_col}{mcap_str}"
             )
             lines.append(line)
         message = "\n".join(lines)
