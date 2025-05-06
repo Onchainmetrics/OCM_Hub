@@ -424,6 +424,12 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if df is None or df.empty:
             return "❌ No alpha wallets currently holding this token."
         lines = []
+        # Add title line with token symbol if available
+        token_symbol = df['symbol'].iloc[0] if 'symbol' in df.columns and not df['symbol'].isnull().all() else None
+        if token_symbol:
+            lines.append(f"<b>Alpha wallets currently holding {token_symbol}</b>")
+        # Add header line
+        lines.append(" Wallet | 💰 Balance | % | 🟩 Bought | 🟥 Sold | uPNL | AVG")
         def fmt_dollar(val):
             try:
                 v = float(val)
