@@ -126,8 +126,10 @@ def cache_command(expire_minutes: int):
             cache = CacheService()
             
             # Generate cache key
-            if func.__name__ == 'heatmap_command':
-                cache_key = "heatmap"  # No parameters needed
+            if func.__name__ in ['_heatmap_all', 'heatmap_command']:
+                cache_key = "heatmap:all"
+            elif func.__name__ == '_heatmap_elite':
+                cache_key = "heatmap:elite"
             else:
                 # For commands with contract address
                 cache_key = f"{func.__name__}:"
