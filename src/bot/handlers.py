@@ -5,7 +5,8 @@ from src.bot.commands import (
     help_command,  
     whales_command,
     test_alpha_command,
-    heatmap_command
+    heatmap_command,
+    scan_command
 )
 import logging
 
@@ -37,4 +38,5 @@ def register_handlers(application):
     application.add_handler(CommandHandler('help', help_command))
     application.add_handler(CommandHandler('whales', whales_command))
     application.add_handler(CommandHandler('testalpha', test_alpha_command))
-    application.add_handler(CommandHandler('heatmap', heatmap_command)) 
+    application.add_handler(CommandHandler('heatmap', heatmap_command))
+    application.add_handler(CommandHandler('scan', scan_command)) 

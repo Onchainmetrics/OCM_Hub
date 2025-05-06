@@ -22,6 +22,7 @@ class TelegramBot:
             BotCommand("help", "Show help message"),
             BotCommand("whales", "Get whale analysis for a token"),
             BotCommand("heatmap", "Track alpha wallet flows [elite|all]"),
+            BotCommand("scan", "Scan a token for current alpha holders"),
             BotCommand("testalpha", "Test alpha tracker functionality")
         ]
         

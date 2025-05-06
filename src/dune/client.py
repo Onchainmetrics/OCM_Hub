@@ -66,3 +66,30 @@ class DuneAnalytics:
         except Exception as e:
             logger.error(f"Error executing heatmap analysis query: {e}")
             raise 
+
+    async def scan_ca(self, contract_address: str) -> pd.DataFrame:
+        """Execute query to scan a specific token"""
+        try:
+            query = QueryBase(
+                name="CA Scan",
+                query_id=5088772,
+                params=[
+                    QueryParameter.text_type(
+                        name="Contract Address",
+                        value=contract_address
+                    )
+                ]
+            )
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self.client.run_query(
+                    query=query,
+                    performance="large"
+                )
+            )
+            return pd.DataFrame(results.result.rows)
+        except Exception as e:
+            logger.error(f"Error executing CA scan query: {str(e)}")
+            logger.error(f"Query parameters: Contract Address={contract_address}")
+            raise 

@@ -183,12 +183,12 @@ async def heatmap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     try:
         # Parse mode from arguments
-        mode = 'elite'  # default to elite mode
+        mode = 'all'  # default to all mode
         if context.args:
-            if context.args[0].lower() == 'all':
-                mode = 'all'
-            elif context.args[0].lower() != 'elite':
-                return "❌ Invalid mode. Usage: /heatmap [elite|all]"
+            if context.args[0].lower() == 'elite':
+                mode = 'elite'
+            elif context.args[0].lower() != 'all':
+                return "❌ Invalid mode. Usage: /heatmap [all|elite]"
 
         # Call the appropriate cached function based on mode
         if mode == 'all':
@@ -352,9 +352,21 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     
     # Filter and sort the dataframe
     active_df = df.copy()
-    
-    # Apply minimum wallet threshold based on mode
-    active_df = active_df[active_df['active_alphas'] >= medium_alpha_threshold]
+
+    # --- Begin Exception Logic ---
+    # Identify exception tokens: abs(flow_24h / avg_mcap_at_entry) >= 0.005
+    exception_mask = (
+        active_df['avg_mcap_at_entry'].notnull() &
+        (active_df['avg_mcap_at_entry'] != 0) &
+        ((active_df['flow_24h'] / active_df['avg_mcap_at_entry']).abs() >= 0.005)
+    )
+    exception_tokens = active_df[exception_mask]
+    # Apply minimum wallet threshold filter as usual
+    threshold_mask = active_df['active_alphas'] >= medium_alpha_threshold
+    threshold_tokens = active_df[threshold_mask]
+    # Combine, avoiding duplicates by token_address
+    active_df = pd.concat([threshold_tokens, exception_tokens]).drop_duplicates(subset=['token_address'])
+    # --- End Exception Logic ---
     
     if not active_df.empty:
         # Sort by number of wallets first, then by total 24h flow
@@ -395,11 +407,52 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     
     return "\n".join(message)
 
+@command_handler
+@cache_command(expire_minutes=120)
+async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Scan a contract address and return current alpha holders with details."""
+    if not await check_auth(update):
+        return
+    if not context.args:
+        await update.message.reply_text("Please provide a contract address.\nUsage: /scan <contract_address>")
+        return
+    contract_address = context.args[0]
+    try:
+        await update.message.reply_text(f"🔍 Scanning token: <code>{contract_address}</code>...\nPlease wait...", parse_mode='HTML')
+        dune = DuneAnalytics()
+        df = await dune.scan_ca(contract_address)
+        if df is None or df.empty:
+            return "❌ No alpha wallets currently holding this token."
+        # Format output: one line per wallet, all columns, wallet as gmgn link (first 3...last 3 chars)
+        lines = []
+        for _, row in df.iterrows():
+            wallet = str(row['wallet'])
+            short_wallet = f"{wallet[:3]}...{wallet[-3:]}"
+            gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
+            wallet_html = f"<a href='{gmgn_link}'>{short_wallet}</a>"
+            # Compose line with all columns
+            line = (
+                f"{wallet_html} | "
+                f"usd_balance: {row.get('usd_balance', 'N/A')} | "
+                f"%owned: {row.get('percentage_owned', 'N/A')} | "
+                f"type: {row.get('trader_type', 'N/A')} | "
+                f"avg_mcap: {row.get('average_cost_basis_mcap', 'N/A')} | "
+                f"bought: {row.get('total_bought', 'N/A')} | "
+                f"sold: {row.get('total_sold', 'N/A')}"
+            )
+            lines.append(line)
+        message = "\n".join(lines)
+        return message
+    except Exception as e:
+        logger.error(f"Error in scan command: {e}")
+        return "❌ Error occurred while scanning CA. Please try again later."
+
 welcome_message = (
     "🔍 Welcome to CA Scanner Bot!\n\n"
     "Available commands:\n"
     "/whales <contract_address> - Get whale analysis\n"
-    "/heatmap [elite|all] - View live alpha wallet activity\n"
+    "/heatmap [all|elite] - View live alpha wallet activity (default: all)\n"
+    "/scan <contract_address> - Scan a token for current alpha holders\n"
     "/help - Show this help message\n"
     "/testalpha - Test alpha tracker functionality"
 )
@@ -408,10 +461,12 @@ help_text = (
     "🤖 CA Scanner Bot Commands:\n\n"
     "/whales <contract_address>\n"
     "- Get detailed whale analysis for a token\n\n"
-    "/heatmap [elite|all]\n"
+    "/heatmap [all|elite]\n"
     "- View live alpha wallet activity\n"
-    "- Use 'elite' for elite traders only (default)\n"
-    "- Use 'all' to include all traders\n\n"
+    "- Default is 'all' (all traders)\n"
+    "- Use 'elite' for elite traders only\n\n"
+    "/scan <contract_address>\n"
+    "- Scan a token for current alpha holders\n\n"
     "/testalpha\n"
     "- Test alpha tracker functionality\n\n"
     "/help\n"
