@@ -423,7 +423,6 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         df = await dune.scan_ca(contract_address)
         if df is None or df.empty:
             return "❌ No alpha wallets currently holding this token."
-        # Format output: one line per wallet, all columns, wallet as gmgn link (first 3...last 3 chars)
         lines = []
         def fmt_dollar(val):
             try:
@@ -441,47 +440,45 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             short_wallet = f"{wallet[:3]}...{wallet[-3:]}"
             gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
             wallet_html = f"<a href='{gmgn_link}'>{short_wallet}</a>"
-            # Format usd_balance, bought, sold as $K/$M
             usd_balance = fmt_dollar(row.get('usd_balance', 'N/A'))
             bought_raw = row.get('total_bought', 0)
             sold_raw = row.get('total_sold', 0)
             bought = fmt_dollar(bought_raw)
             sold = fmt_dollar(sold_raw)
-            # Format avg_mcap as in heatmap
             avg_mcap = row.get('average_cost_basis_mcap', None)
-            mcap_str = ""
+            avg_str = ""
             if avg_mcap is not None:
                 try:
                     mcap = float(avg_mcap)
                     if mcap >= 1_000_000_000:
-                        mcap_str = f" | MCap: ${mcap/1_000_000_000:.1f}B"
+                        avg_str = f"${mcap/1_000_000_000:.1f}B"
                     elif mcap >= 1_000_000:
-                        mcap_str = f" | MCap: ${mcap/1_000_000:.1f}M"
+                        avg_str = f"${mcap/1_000_000:.1f}M"
                     elif mcap >= 1000:
-                        mcap_str = f" | MCap: ${mcap/1000:.0f}K"
+                        avg_str = f"${mcap/1000:.0f}K"
                     else:
-                        mcap_str = f" | MCap: ${mcap:.0f}"
+                        avg_str = f"${mcap:.0f}"
                 except Exception:
                     pass
-            # Format %owned
             pct_owned = row.get('percentage_owned', 0)
             try:
-                pct_owned = round(float(pct_owned) + 1e-8, 2)  # round up on .005
-                pct_owned_str = f"{pct_owned:.2f}%"
+                pct_owned = round(float(pct_owned) + 1e-8, 2)
+                pct_owned_str = f"{pct_owned:.2f}"
             except Exception:
                 pct_owned_str = str(pct_owned)
-            # Calculate uPNL: usd_balance + total_sold - total_bought
             try:
                 upnl_val = float(row.get('usd_balance', 0)) + float(sold_raw) - float(bought_raw)
                 upnl_str = fmt_dollar(upnl_val)
                 upnl_emoji = '🟢' if upnl_val >= 0 else '🔴'
-                upnl_col = f"uPNL: {upnl_emoji} {upnl_str}"
             except Exception:
-                upnl_col = "uPNL: N/A"
-            # Compose line with all columns (no trader type)
+                upnl_str = "N/A"
+                upnl_emoji = ''
             line = (
-                f"{wallet_html} | usd_balance: {usd_balance} | %owned: {pct_owned_str} | "
-                f"bought: {bought} | sold: {sold} | {upnl_col}{mcap_str}"
+                f"<b>{wallet_html}</b> | "
+                f"💰 {usd_balance} | % {pct_owned_str} | "
+                f"🟩 {bought} | 🟥 {sold} | "
+                f"uPNL: {upnl_emoji} {upnl_str} | "
+                f"AVG: {avg_str}"
             )
             lines.append(line)
         message = "\n".join(lines)
