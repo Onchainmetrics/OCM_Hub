@@ -353,20 +353,9 @@ async def format_heatmap(df: pd.DataFrame, is_elite_mode: bool = False) -> str:
     # Filter and sort the dataframe
     active_df = df.copy()
 
-    # --- Begin Exception Logic ---
-    # Identify exception tokens: abs(flow_24h / avg_mcap_at_entry) >= 0.005
-    exception_mask = (
-        active_df['avg_mcap_at_entry'].notnull() &
-        (active_df['avg_mcap_at_entry'] != 0) &
-        ((active_df['flow_24h'] / active_df['avg_mcap_at_entry']).abs() >= 0.005)
-    )
-    exception_tokens = active_df[exception_mask]
-    # Apply minimum wallet threshold filter as usual
+    # Only include tokens meeting the minimum wallet threshold
     threshold_mask = active_df['active_alphas'] >= medium_alpha_threshold
-    threshold_tokens = active_df[threshold_mask]
-    # Combine, avoiding duplicates by token_address
-    active_df = pd.concat([threshold_tokens, exception_tokens]).drop_duplicates(subset=['token_address'])
-    # --- End Exception Logic ---
+    active_df = active_df[threshold_mask]
     
     if not active_df.empty:
         # Sort by number of wallets first, then by total 24h flow
