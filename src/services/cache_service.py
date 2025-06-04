@@ -130,6 +130,22 @@ def cache_command(expire_minutes: int):
                 cache_key = "heatmap:all"
             elif func.__name__ == '_heatmap_elite':
                 cache_key = "heatmap:elite"
+            elif func.__name__ == 'flows_command':
+                # Special handling for flows_command to include both hours_interval and top_n
+                hours_interval = 24
+                top_n = 15
+                if len(args) > 1 and hasattr(args[1], 'args'):
+                    if len(args[1].args) > 0:
+                        try:
+                            hours_interval = int(args[1].args[0])
+                        except Exception:
+                            pass
+                    if len(args[1].args) > 1:
+                        try:
+                            top_n = int(args[1].args[1])
+                        except Exception:
+                            pass
+                cache_key = f"flows_command:{hours_interval}:{top_n}"
             else:
                 # For commands with contract address
                 cache_key = f"{func.__name__}:"
