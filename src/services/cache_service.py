@@ -124,39 +124,31 @@ def cache_command(expire_minutes: int):
         @wraps(func)
         async def wrapper(*args, **kwargs):
             cache = CacheService()
-
+            
             # Generate cache key
             if func.__name__ in ['_heatmap_all', 'heatmap_command']:
                 cache_key = "heatmap:all"
             elif func.__name__ == '_heatmap_elite':
                 cache_key = "heatmap:elite"
-            elif func.__name__ == 'flows_command':
-                # Only cache /flows with no parameters
-                cache_key = None
-                if len(args) > 1 and hasattr(args[1], 'args') and not args[1].args:
-                    cache_key = "flows_command:default"
-                if cache_key:
-                    cached_result = await cache.get(cache_key)
-                    if cached_result is not None:
-                        logger.info(f"Cache hit for {cache_key}")
-                        return cached_result
-                # If not in cache or parameters provided, execute function
-                result = await func(*args, **kwargs)
-                if cache_key and result:
-                    await cache.set(cache_key, result, expire_minutes)
-                return result
             else:
                 # For commands with contract address
                 cache_key = f"{func.__name__}:"
                 if len(args) > 1 and hasattr(args[1], 'args') and args[1].args:
                     cache_key += args[1].args[0].lower()  # Contract address in lowercase
-                cached_result = await cache.get(cache_key)
-                if cached_result is not None:
-                    logger.info(f"Cache hit for {cache_key}")
-                    return cached_result
-                result = await func(*args, **kwargs)
-                if result:
-                    await cache.set(cache_key, result, expire_minutes)
-                return result
+            
+            # Try to get from cache
+            cached_result = await cache.get(cache_key)
+            if cached_result is not None:
+                logger.info(f"Cache hit for {cache_key}")
+                return cached_result
+            
+            # If not in cache, execute function
+            result = await func(*args, **kwargs)
+            
+            # Cache the result
+            if result:  # Only cache if we got a valid result
+                await cache.set(cache_key, result, expire_minutes)
+            
+            return result
         return wrapper
     return decorator 
