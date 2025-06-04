@@ -482,12 +482,79 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in scan command: {e}")
         return "❌ Error occurred while scanning CA. Please try again later."
 
+@command_handler
+@cache_command(expire_minutes=15)
+async def flows_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get top token inflows/outflows for the last N hours"""
+    if not await check_auth(update):
+        return
+    # Parse arguments for hours_interval and top_n
+    hours_interval = 24
+    top_n = 50
+    if context.args:
+        try:
+            if len(context.args) > 0:
+                hours_interval = int(context.args[0])
+            if len(context.args) > 1:
+                top_n = int(context.args[1])
+        except Exception:
+            return "❌ Invalid arguments. Usage: /flows [hours_interval] [top_n]"
+    try:
+        await update.message.reply_text(f"🔄 Fetching top inflows/outflows for the last {hours_interval}h...", parse_mode='HTML')
+        dune = DuneAnalytics()
+        df = await dune.get_inflows(hours_interval=hours_interval, top_n=top_n)
+        if df is None or df.empty:
+            return "❌ No flow data found."
+        message = await format_flows(df)
+        return message
+    except Exception as e:
+        logger.error(f"Error in flows command: {e}")
+        return "❌ Error occurred while fetching flows. Please try again later."
+
+async def format_flows(df: pd.DataFrame) -> str:
+    """Format inflow/outflow data for Telegram output, including GMGN link for each token."""
+    if df.empty:
+        return "🔍 No significant token flows detected."
+    message = [
+        "<b>Top Token Inflows/Outflows</b>\n",
+        "<i>Click the contract address to copy it</i>\n"
+    ]
+    threshold = 10_000
+    for _, row in df.iterrows():
+        try:
+            net_flow = float(row.get('net_flow', 0))
+            if abs(net_flow) < threshold:
+                continue
+            symbol = row.get('token_symbol', row.get('代币名称', ''))
+            ca = row.get('mint_address', '')
+            holders = row.get('holders', row.get('持币地址数', ''))
+            days = row.get('days_since_listing', row.get('上线天数', ''))
+            total_vol = row.get('total_volume', row.get('总交易量(USD)', 0))
+            # Color and emoji for net flow
+            color = '🟢' if net_flow > 0 else '🔴'
+            flow_str = f"${abs(net_flow):,.0f}"
+            ca_html = f"<code>{ca}</code>"
+            gmgn_link = f'<a href="https://gmgn.ai/sol/token/{ca}">{symbol}</a>' if ca and symbol else ''
+            line = (
+                f"{color} <b>{symbol}</b> | Net Flow: {flow_str} | {ca_html}\n"
+                f"GMGN: {gmgn_link}\n"
+                f"Holders: {holders} | Days Since Listing: {days} | Total Vol: ${float(total_vol):,.0f}\n"
+            )
+            message.append(line)
+        except Exception as e:
+            logger.error(f"Error formatting row: {e}")
+            continue
+    if len(message) <= 2:
+        return "🔍 No significant token flows detected."
+    return "\n".join(message)
+
 welcome_message = (
     "🔍 Welcome to CA Scanner Bot!\n\n"
     "Available commands:\n"
     "/whales <contract_address> - Get whale analysis\n"
     "/heatmap [all|elite] - View live alpha wallet activity (default: all)\n"
     "/scan <contract_address> - Scan a token for current alpha holders\n"
+    "/flows [hours] [top_n] - View top token inflows/outflows (default: 24h, top 50)\n"
     "/help - Show this help message\n"
     "/testalpha - Test alpha tracker functionality"
 )
@@ -502,6 +569,9 @@ help_text = (
     "- Use 'elite' for elite traders only\n\n"
     "/scan <contract_address>\n"
     "- Scan a token for current alpha holders\n\n"
+    "/flows [hours_interval] [top_n]\n"
+    "- View top token inflows/outflows for the last N hours (default: 24h, top 50)\n"
+    "- Example: /flows 12 20 (shows top 20 tokens for last 12h)\n\n"
     "/testalpha\n"
     "- Test alpha tracker functionality\n\n"
     "/help\n"

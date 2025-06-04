@@ -93,3 +93,33 @@ class DuneAnalytics:
             logger.error(f"Error executing CA scan query: {str(e)}")
             logger.error(f"Query parameters: Contract Address={contract_address}")
             raise 
+
+    async def get_inflows(self, hours_interval: int = 24, top_n: int = 50) -> pd.DataFrame:
+        """Execute query for inflows/outflows for all tokens"""
+        try:
+            query = QueryBase(
+                name="Token Inflows/Outflows",
+                query_id=5232825,
+                params=[
+                    QueryParameter.number_type(
+                        name="hours_interval",
+                        value=hours_interval
+                    ),
+                    QueryParameter.number_type(
+                        name="top_n",
+                        value=top_n
+                    )
+                ]
+            )
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self.client.run_query(
+                    query=query,
+                    performance="large"
+                )
+            )
+            return pd.DataFrame(results.result.rows)
+        except Exception as e:
+            logger.error(f"Error executing inflows query: {e}")
+            raise 
