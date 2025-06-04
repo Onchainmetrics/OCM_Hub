@@ -498,14 +498,14 @@ def split_message(message, max_length=MAX_MESSAGE_LENGTH):
     return chunks
 
 @command_handler
-@cache_command(expire_minutes=15)
+@cache_command(expire_minutes=120)
 async def flows_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get top token inflows/outflows for the last N hours"""
     if not await check_auth(update):
         return
     # Parse arguments for hours_interval and top_n
     hours_interval = 24
-    top_n = 50
+    top_n = 15  # Updated default
     if context.args:
         try:
             if len(context.args) > 0:
@@ -514,6 +514,9 @@ async def flows_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 top_n = int(context.args[1])
         except Exception:
             return "❌ Invalid arguments. Usage: /flows [hours_interval] [top_n]"
+    # Set cache key for flows_command to include both params
+    if hasattr(context, 'cache_key'):
+        context.cache_key = f"flows_command:{hours_interval}:{top_n}"
     try:
         await update.message.reply_text(f"🔄 Fetching top inflows/outflows for the last {hours_interval}h...", parse_mode='HTML')
         dune = DuneAnalytics()
@@ -572,7 +575,7 @@ welcome_message = (
     "/whales <contract_address> - Get whale analysis\n"
     "/heatmap [all|elite] - View live alpha wallet activity (default: all)\n"
     "/scan <contract_address> - Scan a token for current alpha holders\n"
-    "/flows [hours] [top_n] - View top token inflows/outflows (default: 24h, top 50)\n"
+    "/flows [hours] [top_n] - View top token inflows/outflows (default: 24h, top 15)\n"
     "/help - Show this help message\n"
     "/testalpha - Test alpha tracker functionality"
 )
@@ -588,7 +591,7 @@ help_text = (
     "/scan <contract_address>\n"
     "- Scan a token for current alpha holders\n\n"
     "/flows [hours_interval] [top_n]\n"
-    "- View top token inflows/outflows for the last N hours (default: 24h, top 50)\n"
+    "- View top token inflows/outflows for the last N hours (default: 24h, top 15)\n"
     "- Example: /flows 12 20 (shows top 20 tokens for last 12h)\n\n"
     "/testalpha\n"
     "- Test alpha tracker functionality\n\n"
