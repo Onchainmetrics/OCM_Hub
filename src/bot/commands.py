@@ -482,6 +482,21 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in scan command: {e}")
         return "❌ Error occurred while scanning CA. Please try again later."
 
+MAX_MESSAGE_LENGTH = 4000  # Telegram limit is 4096, use a bit less for safety
+
+def split_message(message, max_length=MAX_MESSAGE_LENGTH):
+    lines = message.split('\n')
+    chunks = []
+    current_chunk = ""
+    for line in lines:
+        if len(current_chunk) + len(line) + 1 > max_length:
+            chunks.append(current_chunk)
+            current_chunk = ""
+        current_chunk += line + "\n"
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
 @command_handler
 @cache_command(expire_minutes=15)
 async def flows_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -506,7 +521,10 @@ async def flows_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if df is None or df.empty:
             return "❌ No flow data found."
         message = await format_flows(df)
-        return message
+        chunks = split_message(message)
+        for chunk in chunks:
+            await update.message.reply_text(chunk, parse_mode='HTML', disable_web_page_preview=True)
+        return None  # Prevent double sending by command_handler
     except Exception as e:
         logger.error(f"Error in flows command: {e}")
         return "❌ Error occurred while fetching flows. Please try again later."
