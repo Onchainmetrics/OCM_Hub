@@ -39,7 +39,7 @@ class PriceService:
                 "params": {
                     "id": token_address,
                     "displayOptions": {
-                        "showFungibleTokens": True
+                        "showFungible": True
                     }
                 }
             }
