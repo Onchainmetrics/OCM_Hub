@@ -222,7 +222,7 @@ class AlphaTracker:
                     parsed_tx = {
                         'wallet_address': wallet_address,
                         'token_address': token_address,
-                        'token_symbol': transfer.get('tokenSymbol', token_data.get('symbol', 'Unknown') if 'token_data' in locals() else 'Unknown'),
+                        'token_symbol': transfer.get('tokenSymbol', token_data.get('symbol', 'Unknown') if token_data else 'Unknown'),
                         'is_buy': is_buy,
                         'sol_amount': sol_amount,
                         'token_amount': token_amount,
