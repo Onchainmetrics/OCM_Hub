@@ -83,9 +83,14 @@ class AlphaTracker:
                         new_profiles[wallet] = {
                             'category': row['trader_type'],
                             'win_rate': row.get('win_rate', 0),
-                            'avg_hold_hours': row.get('avg_hold_hours', 0),
                             'trades_per_day': row.get('trades_per_day', 0),
-                            'total_profits': row.get('total_profits', 0)
+                            'total_profits': row.get('total_profits', 0),
+                            'unique_tokens': row.get('unique_tokens', 0),
+                            'total_trades': row.get('total_trades', 0),
+                            'spike_tokens_traded': row.get('spike_tokens_traded', 0),
+                            'massive_wins': row.get('massive_wins', 0),
+                            'avg_spike_ratio': row.get('avg_spike_ratio', 0),
+                            'last_trade': row.get('last_trade', '')
                         }
                     
                     logger.info(f"Found {len(new_addresses)} addresses")

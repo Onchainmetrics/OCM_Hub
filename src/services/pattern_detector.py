@@ -137,15 +137,17 @@ class PatternDetector:
             if datetime.fromisoformat(tx['timestamp']) > last_30_min
         ]
         
-        # Get unique alpha wallets by action
+        # Get unique alpha wallets by action - includes all trader types from new query
+        alpha_trader_types = ['Insider', 'Alpha Trader', 'Volume Leader', 'Consistent Performer']
+        
         alpha_buyers = set(
             tx['wallet'] for tx in recent_txs
-            if tx['trader_type'] in ['Alpha Traders', 'Alpha'] and tx['action'] == 'buy'
+            if tx['trader_type'] in alpha_trader_types and tx['action'] == 'buy'
         )
         
         alpha_sellers = set(
             tx['wallet'] for tx in recent_txs
-            if tx['trader_type'] in ['Alpha Traders', 'Alpha'] and tx['action'] == 'sell'
+            if tx['trader_type'] in alpha_trader_types and tx['action'] == 'sell'
         )
         
         # CONFLUENCE: Multiple different alpha wallets on SAME token
@@ -153,7 +155,7 @@ class PatternDetector:
         if len(alpha_buyers) >= 2:
             total_volume = sum(
                 tx['amount_usd'] for tx in recent_txs
-                if tx['trader_type'] in ['Alpha Traders', 'Alpha'] and tx['action'] == 'buy'
+                if tx['trader_type'] in alpha_trader_types and tx['action'] == 'buy'
             )
             wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_buyers)[:3]]
             return f"🔥 {len(alpha_buyers)} Alpha wallets BUYING ${token_symbol} (${total_volume:,.0f})\n   Wallets: {', '.join(wallet_previews)}"
@@ -161,7 +163,7 @@ class PatternDetector:
         elif len(alpha_sellers) >= 2:
             total_volume = sum(
                 tx['amount_usd'] for tx in recent_txs
-                if tx['trader_type'] in ['Alpha Traders', 'Alpha'] and tx['action'] == 'sell'
+                if tx['trader_type'] in alpha_trader_types and tx['action'] == 'sell'
             )
             wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_sellers)[:3]]
             return f"🚨 {len(alpha_sellers)} Alpha wallets SELLING ${token_symbol} (${total_volume:,.0f})\n   Wallets: {', '.join(wallet_previews)}"
@@ -170,6 +172,8 @@ class PatternDetector:
         
     def _check_sequence_pattern(self, transactions: List[dict], token_symbol: str) -> str:
         """Check for Alpha traders followed by other trader types on SAME TOKEN"""
+        alpha_trader_types = ['Insider', 'Alpha Trader', 'Volume Leader', 'Consistent Performer']
+        
         last_2h = datetime.now() - timedelta(hours=2)
         recent_txs = [
             tx for tx in transactions 
@@ -184,7 +188,7 @@ class PatternDetector:
         alpha_action_type = None
         
         for tx in recent_txs:
-            if tx['trader_type'] in ['Alpha Traders', 'Alpha']:
+            if tx['trader_type'] in alpha_trader_types:
                 alpha_action_time = tx['timestamp']
                 alpha_action_type = tx['action']
                 break

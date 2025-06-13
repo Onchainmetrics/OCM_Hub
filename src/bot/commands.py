@@ -285,13 +285,18 @@ async def test_confluence_command(update: Update, context: ContextTypes.DEFAULT_
                 'timestamp': datetime.now().isoformat()
             }
             
-            # Add to trader profiles as Alpha Traders
+            # Add to trader profiles as Alpha Trader (new structure)
             alpha_tracker.trader_profiles[wallet] = {
-                'category': 'Alpha Traders',
-                'win_rate': 0.85,
-                'avg_hold_hours': 24,
-                'trades_per_day': 5,
-                'total_profits': 50000
+                'category': 'Alpha Trader',
+                'win_rate': 85.0,
+                'trades_per_day': 5.0,
+                'total_profits': 150000,
+                'unique_tokens': 15,
+                'total_trades': 50,
+                'spike_tokens_traded': 3,
+                'massive_wins': 2,
+                'avg_spike_ratio': 12.5,
+                'last_trade': datetime.now().isoformat()
             }
             
             patterns = await alpha_tracker.pattern_detector.add_transaction(test_tx)
@@ -342,11 +347,16 @@ async def test_confluence_command(update: Update, context: ContextTypes.DEFAULT_
                 'timestamp': datetime.now().isoformat()
             }
             alpha_tracker.trader_profiles[test_wallets[2]] = {
-                'category': 'Alpha Traders',
-                'win_rate': 0.90,
-                'avg_hold_hours': 18,
-                'trades_per_day': 8,
-                'total_profits': 75000
+                'category': 'Insider',
+                'win_rate': 90.0,
+                'trades_per_day': 8.0,
+                'total_profits': 200000,
+                'unique_tokens': 12,
+                'total_trades': 80,
+                'spike_tokens_traded': 5,
+                'massive_wins': 4,
+                'avg_spike_ratio': 15.2,
+                'last_trade': datetime.now().isoformat()
             }
             patterns = await alpha_tracker.pattern_detector.add_transaction(test_tx)
             
