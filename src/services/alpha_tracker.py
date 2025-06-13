@@ -204,6 +204,12 @@ class AlphaTracker:
                         elif native_transfer.get('toUserAccount') == wallet_address:
                             sol_amount += native_transfer.get('amount', 0) / 1e9
                             
+                    # Initialize default values first
+                    token_data = None
+                    token_price = 0
+                    current_market_cap = 0
+                    usd_value = sol_amount * 100  # Fallback SOL price
+                    
                     # Get real-time prices and market cap
                     try:
                         token_data = await self.price_service.get_token_data(token_address)
@@ -213,27 +219,31 @@ class AlphaTracker:
                             token_price = token_data.get('price_per_token', 0)
                             current_market_cap = token_data.get('market_cap', 0)
                             usd_value = (sol_amount * sol_price) if is_buy else (token_amount * token_price)
+                            logger.info(f"Token data fetched for {token_address[:8]}...: symbol={token_data.get('symbol', 'Unknown')}, price={token_price}, mcap={current_market_cap}")
                         else:
-                            # Fallback values
-                            token_price = 0
-                            current_market_cap = 0
-                            usd_value = sol_amount * 100  # Fallback SOL price
+                            logger.warning(f"No token data or SOL price available for {token_address[:8]}...")
                     except Exception as e:
-                        logger.error(f"Error fetching real-time prices: {e}")
-                        token_price = 0
-                        current_market_cap = 0
-                        usd_value = sol_amount * 100
+                        logger.error(f"Error fetching real-time prices for {token_address[:8]}...: {e}")
+                    
+                    # Get token symbol from multiple sources
+                    token_symbol = 'Unknown'
+                    if transfer.get('tokenSymbol'):
+                        token_symbol = transfer.get('tokenSymbol')
+                    elif token_data and token_data.get('symbol'):
+                        token_symbol = token_data.get('symbol')
+                    
+                    logger.info(f"Creating parsed transaction: wallet={wallet_address[:8]}..., token={token_address[:8]}..., symbol={token_symbol}, action={'BUY' if is_buy else 'SELL'}, usd_value={usd_value}")
                     
                     parsed_tx = {
                         'wallet_address': wallet_address,
                         'token_address': token_address,
-                        'token_symbol': transfer.get('tokenSymbol', token_data.get('symbol', 'Unknown') if token_data else 'Unknown'),
+                        'token_symbol': token_symbol,
                         'is_buy': is_buy,
                         'sol_amount': sol_amount,
                         'token_amount': token_amount,
                         'usd_value': usd_value,
-                        'price': token_price if 'token_price' in locals() else 0,
-                        'current_market_cap': current_market_cap if 'current_market_cap' in locals() else 0,
+                        'price': token_price,
+                        'current_market_cap': current_market_cap,
                         'timestamp': datetime.now().isoformat(),
                         'signature': tx_data.get('signature', '')
                     }
@@ -271,11 +281,26 @@ class AlphaTracker:
             transactions = await self.parse_helius_webhook(webhook_data)
             
             for swap_data in transactions:
-                logger.info(f"Processing swap: {swap_data['wallet_address'][:8]}... {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'} - Token: {swap_data['token_address']}")
+                wallet = swap_data['wallet_address']
+                token = swap_data['token_address']
+                
+                # Check if wallet is in trader profiles
+                trader_profile = self.trader_profiles.get(wallet, {})
+                trader_category = trader_profile.get('category', 'Unknown')
+                
+                logger.info(f"Processing swap: {wallet[:8]}... {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'} - Token: {token[:8]}... - Trader Type: {trader_category}")
                 
                 # Check for confluence patterns - this is our PRIMARY PURPOSE
                 patterns = await self.pattern_detector.add_transaction(swap_data)
-                logger.info(f"Pattern detection result for {swap_data['token_address'][:8]}...: {patterns}")
+                logger.info(f"Pattern detection result for {token[:8]}...: {patterns}")
+                
+                # Also log trader profiles count for debugging
+                if not hasattr(self, '_logged_profiles_count'):
+                    logger.info(f"Total trader profiles loaded: {len(self.trader_profiles)}")
+                    alpha_trader_types = ['Insider', 'Alpha Trader', 'Volume Leader', 'Consistent Performer']
+                    alpha_count = sum(1 for profile in self.trader_profiles.values() if profile.get('category') in alpha_trader_types)
+                    logger.info(f"Alpha traders count: {alpha_count}")
+                    self._logged_profiles_count = True
                 
                 # ONLY notify when CONFLUENCE patterns are detected
                 if patterns:

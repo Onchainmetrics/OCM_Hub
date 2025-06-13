@@ -87,18 +87,23 @@ class PatternDetector:
         token_address = transaction['token_address']
         wallet = transaction['wallet_address']
         
+        trader_type = self.trader_profiles.get(wallet, {}).get('category', 'Unknown')
+        logger.info(f"Adding transaction: wallet={wallet[:8]}..., token={token_address[:8]}..., trader_type={trader_type}, action={'buy' if transaction['is_buy'] else 'sell'}")
+        
         # Store transaction with token address as key
         await self._store_transaction(token_address, {
             'timestamp': datetime.now().isoformat(),
             'wallet': wallet,
             'action': 'buy' if transaction['is_buy'] else 'sell',
             'amount_usd': transaction['usd_value'],
-            'trader_type': self.trader_profiles.get(wallet, {}).get('category', 'Unknown'),
+            'trader_type': trader_type,
             'token_symbol': transaction.get('token_symbol', 'Unknown')
         })
         
         # Check patterns for THIS SPECIFIC TOKEN only
-        return await self._check_patterns(token_address)
+        patterns = await self._check_patterns(token_address)
+        logger.info(f"Pattern check result for {token_address[:8]}...: found {len(patterns)} patterns")
+        return patterns
         
     async def _check_patterns(self, token_address: str) -> List[str]:
         """Check for confluence patterns for this specific token"""
@@ -137,6 +142,12 @@ class PatternDetector:
             if datetime.fromisoformat(tx['timestamp']) > last_30_min
         ]
         
+        logger.info(f"Checking alpha confluence for {token_symbol}: {len(transactions)} total txs, {len(recent_txs)} recent txs (30min)")
+        
+        # Log all recent transactions for debugging
+        for tx in recent_txs:
+            logger.info(f"  Recent tx: wallet={tx['wallet'][:8]}..., action={tx['action']}, trader_type={tx['trader_type']}")
+        
         # Get unique alpha wallets by action - includes all trader types from new query
         alpha_trader_types = ['Insider', 'Alpha Trader', 'Volume Leader', 'Consistent Performer']
         
@@ -149,6 +160,8 @@ class PatternDetector:
             tx['wallet'] for tx in recent_txs
             if tx['trader_type'] in alpha_trader_types and tx['action'] == 'sell'
         )
+        
+        logger.info(f"Alpha confluence check for {token_symbol}: {len(alpha_buyers)} buyers, {len(alpha_sellers)} sellers")
         
         # CONFLUENCE: Multiple different alpha wallets on SAME token
         logger.info(f"Alpha buyers for {token_symbol}: {alpha_buyers}, Alpha sellers: {alpha_sellers}")
