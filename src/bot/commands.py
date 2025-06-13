@@ -297,9 +297,38 @@ async def test_confluence_command(update: Update, context: ContextTypes.DEFAULT_
             patterns = await alpha_tracker.pattern_detector.add_transaction(test_tx)
             
             if patterns:
-                message = f"🚨 CONFLUENCE DETECTED!\n\n" + "\n".join(patterns)
-                await update.message.reply_text(message, parse_mode='HTML')
-                break
+                # Use the real confluence notification format
+                try:
+                    # Add market cap for testing
+                    test_tx['current_market_cap'] = 4_450_000  # $4.45M like in your example
+                    
+                    # Get recent transactions for this token
+                    recent_txs = await alpha_tracker.pattern_detector._get_recent_transactions(test_token)
+                    
+                    # Get involved wallets for cost basis analysis
+                    involved_wallets = list(set(tx['wallet'] for tx in recent_txs))
+                    
+                    # Get cost basis analysis
+                    confluence_analysis = await alpha_tracker.cost_basis_service.analyze_confluence_cost_basis(
+                        involved_wallets,
+                        test_token,
+                        test_tx['current_market_cap']
+                    )
+                    
+                    # Use the full confluence notification format
+                    message = await alpha_tracker.format_confluence_notification(
+                        test_tx, patterns, confluence_analysis, recent_txs
+                    )
+                    
+                    await update.message.reply_text(message, parse_mode='HTML')
+                    break
+                    
+                except Exception as e:
+                    logger.error(f"Error formatting full confluence notification: {e}")
+                    # Fallback to basic message
+                    message = f"🚨 CONFLUENCE DETECTED!\n\n" + "\n".join(patterns)
+                    await update.message.reply_text(message, parse_mode='HTML')
+                    break
         else:
             # Try one more to trigger confluence
             test_tx = {
@@ -322,8 +351,22 @@ async def test_confluence_command(update: Update, context: ContextTypes.DEFAULT_
             patterns = await alpha_tracker.pattern_detector.add_transaction(test_tx)
             
             if patterns:
-                message = f"🚨 CONFLUENCE DETECTED!\n\n" + "\n".join(patterns)
-                await update.message.reply_text(message, parse_mode='HTML')
+                # Use the real confluence notification format for final test too
+                try:
+                    test_tx['current_market_cap'] = 4_450_000  # $4.45M
+                    recent_txs = await alpha_tracker.pattern_detector._get_recent_transactions(test_token)
+                    involved_wallets = list(set(tx['wallet'] for tx in recent_txs))
+                    confluence_analysis = await alpha_tracker.cost_basis_service.analyze_confluence_cost_basis(
+                        involved_wallets, test_token, test_tx['current_market_cap']
+                    )
+                    message = await alpha_tracker.format_confluence_notification(
+                        test_tx, patterns, confluence_analysis, recent_txs
+                    )
+                    await update.message.reply_text(message, parse_mode='HTML')
+                except Exception as e:
+                    logger.error(f"Error in final confluence test: {e}")
+                    message = f"🚨 CONFLUENCE DETECTED!\n\n" + "\n".join(patterns)
+                    await update.message.reply_text(message, parse_mode='HTML')
             else:
                 await update.message.reply_text("🔍 No confluence detected in test")
                 
@@ -681,6 +724,8 @@ help_text = (
     "- Example: /flows 12 20 (shows top 20 tokens for last 12h)\n\n"
     "/testalpha\n"
     "- Test alpha tracker functionality\n\n"
+    "/testconfluence\n"
+    "- Test confluence detection with simulated data\n\n"
     "/help\n"
     "- Show this help message"
 )
