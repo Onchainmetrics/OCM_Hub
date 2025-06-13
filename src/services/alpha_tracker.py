@@ -212,10 +212,9 @@ class AlphaTracker:
                             # Calculate USD value of transaction
                             usd_value = sol_amount * sol_price
                             
-                            # Calculate market cap using transaction data and cached supply
+                            # Calculate market cap using transaction data and cached metadata
                             market_data = await self.price_service.calculate_market_cap_from_transaction(
-                                token_address, 
-                                transfer.get('tokenSymbol', 'Unknown'),
+                                token_address,
                                 sol_amount,
                                 token_amount,
                                 sol_price
@@ -223,21 +222,21 @@ class AlphaTracker:
                             
                             token_price = market_data.get('price_per_token', 0)
                             current_market_cap = market_data.get('market_cap', 0)
+                            token_symbol = market_data.get('symbol', 'Unknown')
                             
                         else:
                             logger.warning(f"No SOL price available for {token_address[:8]}...")
                             usd_value = sol_amount * 100  # Fallback SOL price
                             token_price = 0
                             current_market_cap = 0
+                            token_symbol = transfer.get('tokenSymbol', 'Unknown')
                             
                     except Exception as e:
                         logger.error(f"Error calculating market cap for {token_address[:8]}...: {e}")
                         usd_value = sol_amount * 100  # Fallback
                         token_price = 0
                         current_market_cap = 0
-                    
-                    # Get token symbol from webhook data
-                    token_symbol = transfer.get('tokenSymbol', 'Unknown')
+                        token_symbol = transfer.get('tokenSymbol', 'Unknown')
                     
                     logger.info(f"Creating parsed transaction: wallet={wallet_address[:8]}..., token={token_address[:8]}..., symbol={token_symbol}, action={'BUY' if is_buy else 'SELL'}, usd_value={usd_value}")
                     
