@@ -204,33 +204,40 @@ class AlphaTracker:
                         elif native_transfer.get('toUserAccount') == wallet_address:
                             sol_amount += native_transfer.get('amount', 0) / 1e9
                             
-                    # Initialize default values first
-                    token_data = None
-                    token_price = 0
-                    current_market_cap = 0
-                    usd_value = sol_amount * 100  # Fallback SOL price
-                    
-                    # Get real-time prices and market cap
+                    # Get SOL price (1-hour cached) and calculate market cap from transaction
                     try:
-                        token_data = await self.price_service.get_token_data(token_address)
                         sol_price = await self.price_service.get_sol_price()
                         
-                        if token_data and sol_price:
-                            token_price = token_data.get('price_per_token', 0)
-                            current_market_cap = token_data.get('market_cap', 0)
-                            usd_value = (sol_amount * sol_price) if is_buy else (token_amount * token_price)
-                            logger.info(f"Token data fetched for {token_address[:8]}...: symbol={token_data.get('symbol', 'Unknown')}, price={token_price}, mcap={current_market_cap}")
+                        if sol_price:
+                            # Calculate USD value of transaction
+                            usd_value = sol_amount * sol_price
+                            
+                            # Calculate market cap using transaction data and cached supply
+                            market_data = await self.price_service.calculate_market_cap_from_transaction(
+                                token_address, 
+                                transfer.get('tokenSymbol', 'Unknown'),
+                                sol_amount,
+                                token_amount,
+                                sol_price
+                            )
+                            
+                            token_price = market_data.get('price_per_token', 0)
+                            current_market_cap = market_data.get('market_cap', 0)
+                            
                         else:
-                            logger.warning(f"No token data or SOL price available for {token_address[:8]}...")
+                            logger.warning(f"No SOL price available for {token_address[:8]}...")
+                            usd_value = sol_amount * 100  # Fallback SOL price
+                            token_price = 0
+                            current_market_cap = 0
+                            
                     except Exception as e:
-                        logger.error(f"Error fetching real-time prices for {token_address[:8]}...: {e}")
+                        logger.error(f"Error calculating market cap for {token_address[:8]}...: {e}")
+                        usd_value = sol_amount * 100  # Fallback
+                        token_price = 0
+                        current_market_cap = 0
                     
-                    # Get token symbol from multiple sources
-                    token_symbol = 'Unknown'
-                    if transfer.get('tokenSymbol'):
-                        token_symbol = transfer.get('tokenSymbol')
-                    elif token_data and token_data.get('symbol'):
-                        token_symbol = token_data.get('symbol')
+                    # Get token symbol from webhook data
+                    token_symbol = transfer.get('tokenSymbol', 'Unknown')
                     
                     logger.info(f"Creating parsed transaction: wallet={wallet_address[:8]}..., token={token_address[:8]}..., symbol={token_symbol}, action={'BUY' if is_buy else 'SELL'}, usd_value={usd_value}")
                     
@@ -250,7 +257,7 @@ class AlphaTracker:
                     
                     # Record transaction for cost basis tracking
                     try:
-                        if current_market_cap > 0:
+                        if current_market_cap and current_market_cap > 0:
                             await self.cost_basis_service.record_transaction(
                                 wallet_address,
                                 token_address,
