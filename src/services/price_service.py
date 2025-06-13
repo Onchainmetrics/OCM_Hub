@@ -52,6 +52,7 @@ class PriceService:
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
+                        logger.info(f"Helius API response for {token_address[:8]}...: {data}")
                         
                         if "result" in data and data["result"]:
                             result = data["result"]

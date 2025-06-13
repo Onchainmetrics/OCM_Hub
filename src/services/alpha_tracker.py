@@ -270,6 +270,7 @@ class AlphaTracker:
                 
                 # Check for confluence patterns - this is our PRIMARY PURPOSE
                 patterns = await self.pattern_detector.add_transaction(swap_data)
+                logger.info(f"Pattern detection result for {swap_data['token_address'][:8]}...: {patterns}")
                 
                 # ONLY notify when CONFLUENCE patterns are detected
                 if patterns:

@@ -106,6 +106,7 @@ class PatternDetector:
         
         # Get recent transactions for this specific token
         token_txs = await self._get_recent_transactions(token_address)
+        logger.info(f"Token {token_address[:8]}... has {len(token_txs)} recent transactions")
         if not token_txs:
             return patterns
             
@@ -148,6 +149,7 @@ class PatternDetector:
         )
         
         # CONFLUENCE: Multiple different alpha wallets on SAME token
+        logger.info(f"Alpha buyers for {token_symbol}: {alpha_buyers}, Alpha sellers: {alpha_sellers}")
         if len(alpha_buyers) >= 2:
             total_volume = sum(
                 tx['amount_usd'] for tx in recent_txs
