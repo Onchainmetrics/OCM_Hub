@@ -9,6 +9,7 @@ from telegram.ext import Application, CommandHandler
 from src.services.cache_service import cache_command
 from functools import wraps
 import time
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,90 @@ async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error(f"Error testing alpha tracker: {e}")
         await update.message.reply_text("❌ Error testing alpha tracker")
+        
+async def test_confluence_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Test confluence detection with simulated transactions"""
+    if not await check_auth(update):
+        return
+        
+    try:
+        await update.message.reply_text("🧪 Testing confluence detection...")
+        
+        # Get alpha tracker
+        alpha_tracker = context.application.alpha_tracker
+        if not alpha_tracker.pattern_detector:
+            from src.services.pattern_detector import PatternDetector
+            dune = DuneAnalytics()
+            alpha_tracker.pattern_detector = PatternDetector(alpha_tracker.trader_profiles, dune.client)
+        
+        # Simulate test token and transactions
+        test_token = "JBahfY5TSFaBooJ5N186Zd9JNvVgm9iHRJSUFT5KqNxA"  # RICO from your example
+        test_wallets = [
+            "DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm",
+            "2xJ8K9pQw3mVnEsZ1H4R6YtN7bF8sX5qW1nM3pL9cR4k",
+            "8nP2Q7rY5tK9mL3xW6vZ1hF4jD8sC2qE9nR7bM5tX1pL"
+        ]
+        
+        # Simulate multiple alpha traders selling the same token
+        await update.message.reply_text("Simulating alpha traders selling same token...")
+        
+        for i, wallet in enumerate(test_wallets[:2]):  # First 2 wallets
+            test_tx = {
+                'wallet_address': wallet,
+                'token_address': test_token,
+                'token_symbol': 'RICO',
+                'is_buy': False,  # SELL
+                'sol_amount': 5.0 + i,
+                'token_amount': 100000 + (i * 10000),
+                'usd_value': 800 + (i * 100),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Add to trader profiles as Alpha Traders
+            alpha_tracker.trader_profiles[wallet] = {
+                'category': 'Alpha Traders',
+                'win_rate': 0.85,
+                'avg_hold_hours': 24,
+                'trades_per_day': 5,
+                'total_profits': 50000
+            }
+            
+            patterns = await alpha_tracker.pattern_detector.add_transaction(test_tx)
+            
+            if patterns:
+                message = f"🚨 CONFLUENCE DETECTED!\n\n" + "\n".join(patterns)
+                await update.message.reply_text(message, parse_mode='HTML')
+                break
+        else:
+            # Try one more to trigger confluence
+            test_tx = {
+                'wallet_address': test_wallets[2],
+                'token_address': test_token,
+                'token_symbol': 'RICO',
+                'is_buy': False,
+                'sol_amount': 7.0,
+                'token_amount': 120000,
+                'usd_value': 1000,
+                'timestamp': datetime.now().isoformat()
+            }
+            alpha_tracker.trader_profiles[test_wallets[2]] = {
+                'category': 'Alpha Traders',
+                'win_rate': 0.90,
+                'avg_hold_hours': 18,
+                'trades_per_day': 8,
+                'total_profits': 75000
+            }
+            patterns = await alpha_tracker.pattern_detector.add_transaction(test_tx)
+            
+            if patterns:
+                message = f"🚨 CONFLUENCE DETECTED!\n\n" + "\n".join(patterns)
+                await update.message.reply_text(message, parse_mode='HTML')
+            else:
+                await update.message.reply_text("🔍 No confluence detected in test")
+                
+    except Exception as e:
+        logger.error(f"Error testing confluence: {e}")
+        await update.message.reply_text(f"❌ Error testing confluence: {str(e)}")
 
 # Primary flow thresholds
 FLOW_THRESHOLDS = {
@@ -577,7 +662,8 @@ welcome_message = (
     "/scan <contract_address> - Scan a token for current alpha holders\n"
     "/flows [hours] [top_n] - View top token inflows/outflows (default: 24h, top 15)\n"
     "/help - Show this help message\n"
-    "/testalpha - Test alpha tracker functionality"
+    "/testalpha - Test alpha tracker functionality\n"
+    "/testconfluence - Test confluence detection with simulated data"
 )
 
 help_text = (

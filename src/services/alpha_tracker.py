@@ -8,7 +8,8 @@ from dune_client.query import QueryBase
 import aiohttp
 import os
 from dotenv import load_dotenv
-from collections import defaultdict
+from src.services.price_service import PriceService
+from src.services.cost_basis_service import CostBasisService
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,11 @@ class AlphaTracker:
         self.UPDATE_INTERVAL = timedelta(days=7)
         self.HELIUS_API_KEY = os.getenv('HELIUS_API_KEY')
         self.WEBHOOK_ID = os.getenv('HELIUS_WEBHOOK_ID')
+        self.WEBHOOK_URL = os.getenv('WEBHOOK_URL')
         self.pattern_detector = None
+        self.telegram_bot = None  # Will be set from main bot instance
+        self.price_service = PriceService()
+        self.cost_basis_service = CostBasisService()
         
     async def get_current_webhook(self) -> List[str]:
         """Get current webhook configuration"""
@@ -112,7 +117,7 @@ class AlphaTracker:
             }
             
             update_data = {
-                "webhookURL": "YOUR_WEBHOOK_URL",  # We need to add this to .env
+                "webhookURL": self.WEBHOOK_URL,
                 "transactionTypes": ["SWAP"],
                 "accountAddresses": addresses,
                 "webhookType": "enhanced"
@@ -141,195 +146,284 @@ class AlphaTracker:
             # Wait for 1 day before checking again
             await asyncio.sleep(24 * 60 * 60)
 
-    async def format_swap_notification(self, swap_data: dict) -> str:
-        """Format swap notification for Telegram"""
+    async def parse_helius_webhook(self, webhook_data: dict) -> List[dict]:
+        """Parse Helius webhook data into standardized format"""
+        parsed_transactions = []
+        
         try:
-            # Determine if buy or sell
-            is_buy = swap_data['is_buy']
-            emoji = "🟢" if is_buy else "🔴"
-            action = "BUY" if is_buy else "SELL"
+            # Handle both single transaction and batch format
+            transactions = webhook_data if isinstance(webhook_data, list) else [webhook_data]
             
-            # Format token info
-            token_symbol = swap_data['token_symbol']
-            project = swap_data['project']  # e.g., "Raydium", "Orca"
-            
-            # Format wallet info
-            wallet_address = swap_data['wallet_address']
-            solscan_link = f"https://solscan.io/account/{wallet_address}"
-            
-            # Format amounts
-            sol_amount = swap_data['sol_amount']
-            token_amount = swap_data['token_amount']
-            usd_value = swap_data['usd_value']
-            price = swap_data['price']
-            
-            # Format holdings
-            total_holdings = swap_data['total_holdings']
-            
-            # Contract address
-            contract_address = swap_data['token_address']
-            
-            message = (
-                f"{emoji} {action} {token_symbol} on {project}\n\n"
-                f"<a href='{solscan_link}'>{wallet_address[:6]}...{wallet_address[-4:]}</a>\n"
-                f"🔄 {sol_amount:.3f} SOL ↔️ {token_amount:,.0f} {token_symbol}\n"
-                f"💵 ${usd_value:,.2f} (${price:.4f})\n\n"
-                f"💰 Holds: {total_holdings:,.0f} {token_symbol}\n\n"
-                f"<code>{contract_address}</code>"
-            )
-            
-            return message
+            for tx_data in transactions:
+                # Extract account keys and transaction info
+                account_keys = tx_data.get('accountKeys', [])
+                native_transfers = tx_data.get('nativeTransfers', [])
+                token_transfers = tx_data.get('tokenTransfers', [])
+                
+                # Find the wallet address (feePayer or first account)
+                wallet_address = None
+                if tx_data.get('feePayer'):
+                    wallet_address = tx_data['feePayer']
+                elif account_keys:
+                    wallet_address = account_keys[0]
+                    
+                if not wallet_address or wallet_address not in self.alpha_addresses:
+                    continue
+                    
+                # Process token transfers to identify swaps
+                for transfer in token_transfers:
+                    token_address = transfer.get('mint')
+                    if not token_address:
+                        continue
+                        
+                    # Skip SOL transfers (wrapped SOL)
+                    if token_address == 'So11111111111111111111111111111111111111112':
+                        continue
+                        
+                    from_user = transfer.get('fromUserAccount')
+                    to_user = transfer.get('toUserAccount')
+                    token_amount = transfer.get('tokenAmount', 0)
+                    
+                    # Determine if this is a buy or sell
+                    is_buy = to_user == wallet_address
+                    is_sell = from_user == wallet_address
+                    
+                    if not (is_buy or is_sell):
+                        continue
+                        
+                    # Calculate SOL equivalent from native transfers
+                    sol_amount = 0
+                    for native_transfer in native_transfers:
+                        if native_transfer.get('fromUserAccount') == wallet_address:
+                            sol_amount += native_transfer.get('amount', 0) / 1e9
+                        elif native_transfer.get('toUserAccount') == wallet_address:
+                            sol_amount += native_transfer.get('amount', 0) / 1e9
+                            
+                    # Get real-time prices and market cap
+                    try:
+                        token_data = await self.price_service.get_token_data(token_address)
+                        sol_price = await self.price_service.get_sol_price()
+                        
+                        if token_data and sol_price:
+                            token_price = token_data.get('price_per_token', 0)
+                            current_market_cap = token_data.get('market_cap', 0)
+                            usd_value = (sol_amount * sol_price) if is_buy else (token_amount * token_price)
+                        else:
+                            # Fallback values
+                            token_price = 0
+                            current_market_cap = 0
+                            usd_value = sol_amount * 100  # Fallback SOL price
+                    except Exception as e:
+                        logger.error(f"Error fetching real-time prices: {e}")
+                        token_price = 0
+                        current_market_cap = 0
+                        usd_value = sol_amount * 100
+                    
+                    parsed_tx = {
+                        'wallet_address': wallet_address,
+                        'token_address': token_address,
+                        'token_symbol': transfer.get('tokenSymbol', token_data.get('symbol', 'Unknown') if 'token_data' in locals() else 'Unknown'),
+                        'is_buy': is_buy,
+                        'sol_amount': sol_amount,
+                        'token_amount': token_amount,
+                        'usd_value': usd_value,
+                        'price': token_price if 'token_price' in locals() else 0,
+                        'current_market_cap': current_market_cap if 'current_market_cap' in locals() else 0,
+                        'timestamp': datetime.now().isoformat(),
+                        'signature': tx_data.get('signature', '')
+                    }
+                    
+                    # Record transaction for cost basis tracking
+                    try:
+                        if current_market_cap > 0:
+                            await self.cost_basis_service.record_transaction(
+                                wallet_address,
+                                token_address,
+                                'buy' if is_buy else 'sell',
+                                token_amount,
+                                current_market_cap,
+                                parsed_tx['timestamp']
+                            )
+                    except Exception as e:
+                        logger.error(f"Error recording cost basis: {e}")
+                    
+                    parsed_transactions.append(parsed_tx)
+                    
         except Exception as e:
-            logger.error(f"Error formatting swap notification: {e}")
-            return "Error formatting swap notification"
-
+            logger.error(f"Error parsing webhook data: {e}")
+            
+        return parsed_transactions
+            
     async def handle_webhook(self, webhook_data: dict):
-        """Handle incoming webhook data"""
+        """Handle incoming webhook data - CONFLUENCE DETECTION ONLY"""
         try:
             # Initialize pattern detector if needed
             if not self.pattern_detector:
-                self.pattern_detector = PatternDetector(self.trader_profiles)
+                from src.services.pattern_detector import PatternDetector
+                self.pattern_detector = PatternDetector(self.trader_profiles, self.dune_client)
             
-            # Process the webhook data
-            swap_data = self.parse_helius_webhook(webhook_data)
+            # Process the webhook data - can return multiple transactions
+            transactions = await self.parse_helius_webhook(webhook_data)
             
-            # Check for patterns
-            patterns = self.pattern_detector.add_transaction(swap_data)
-            
-            # Format basic swap notification
-            message = await self.format_swap_notification(swap_data)
-            
-            # Add pattern alerts if any
-            if patterns:
-                message += "\n\n🔍 Pattern Detected:\n" + "\n".join(patterns)
-            
-            # Send to Telegram
-            await self.send_to_telegram(message)
+            for swap_data in transactions:
+                logger.info(f"Processing swap: {swap_data['wallet_address'][:8]}... {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'} - Token: {swap_data['token_address']}")
+                
+                # Check for confluence patterns - this is our PRIMARY PURPOSE
+                patterns = await self.pattern_detector.add_transaction(swap_data)
+                
+                # ONLY notify when CONFLUENCE patterns are detected
+                if patterns:
+                    try:
+                        # Get all wallets involved in recent transactions for this token
+                        recent_txs = await self.pattern_detector._get_recent_transactions(swap_data['token_address'])
+                        involved_wallets = list(set(tx['wallet'] for tx in recent_txs))
+                        
+                        # Get cost basis analysis for confluence
+                        confluence_analysis = await self.cost_basis_service.analyze_confluence_cost_basis(
+                            involved_wallets,
+                            swap_data['token_address'],
+                            swap_data.get('current_market_cap', 0)
+                        )
+                        
+                        # Format confluence notification
+                        message = await self.format_confluence_notification(
+                            swap_data, patterns, confluence_analysis, recent_txs
+                        )
+                        
+                        # Send to Telegram
+                        await self.send_to_telegram(message)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing confluence notification: {e}")
+                        # Send basic confluence alert as fallback
+                        basic_message = f"🔥 <b>CONFLUENCE DETECTED</b>\n\n" + "\n".join(patterns)
+                        await self.send_to_telegram(basic_message)
             
         except Exception as e:
             logger.error(f"Error handling webhook: {e}")
+            
+    async def send_to_telegram(self, message: str):
+        """Send confluence notification to Telegram"""
+        try:
+            if not self.telegram_bot:
+                logger.error("Telegram bot not initialized")
+                return
+                
+            # Get the configured chat ID for alpha notifications
+            chat_id = os.getenv('ALPHA_NOTIFICATIONS_CHAT_ID')
+            if not chat_id:
+                logger.error("ALPHA_NOTIFICATIONS_CHAT_ID not configured")
+                return
+                
+            await self.telegram_bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+            
+        except Exception as e:
+            logger.error(f"Error sending Telegram notification: {e}")
 
-class PatternDetector:
-    def __init__(self, trader_profiles: Dict[str, dict]):
-        self.trader_profiles = trader_profiles
-        self.recent_transactions = defaultdict(list)  # token -> list of transactions
-        
-    def add_transaction(self, transaction: dict) -> List[str]:
-        """Add transaction and return any detected patterns"""
-        token = transaction['token_address']
-        wallet = transaction['wallet_address']
-        
-        # Store transaction
-        self.recent_transactions[token].append({
-            'timestamp': datetime.now(),
-            'wallet': wallet,
-            'action': 'buy' if transaction['is_buy'] else 'sell',
-            'amount_usd': transaction['usd_value'],
-            'trader_type': self.trader_profiles.get(wallet, {}).get('category', 'Unknown')
-        })
-        
-        # Clean old transactions
-        self._clean_old_transactions()
-        
-        # Check patterns
-        return self._check_patterns(token)
-        
-    def _clean_old_transactions(self):
-        """Remove transactions older than 4 hours"""
-        cutoff = datetime.now() - timedelta(hours=4)
-        for token in self.recent_transactions:
-            self.recent_transactions[token] = [
-                tx for tx in self.recent_transactions[token]
-                if tx['timestamp'] > cutoff
-            ]
+    async def format_confluence_notification(self, trigger_tx: dict, patterns: list, 
+                                           confluence_analysis: dict, recent_txs: list) -> str:
+        """Format confluence notification with detailed analysis"""
+        try:
+            token_symbol = trigger_tx['token_symbol']
+            token_address = trigger_tx['token_address']
+            current_market_cap = trigger_tx.get('current_market_cap', 0)
             
-    def _check_patterns(self, token: str) -> List[str]:
-        """Check for interesting patterns"""
-        patterns = []
-        
-        # Get recent transactions for this token
-        token_txs = self.recent_transactions[token]
-        if not token_txs:
-            return patterns
+            # Format market cap
+            if current_market_cap >= 1_000_000_000:
+                mcap_str = f"${current_market_cap/1_000_000_000:.2f}B"
+            elif current_market_cap >= 1_000_000:
+                mcap_str = f"${current_market_cap/1_000_000:.1f}M"
+            elif current_market_cap >= 1_000:
+                mcap_str = f"${current_market_cap/1_000:.0f}K"
+            else:
+                mcap_str = f"${current_market_cap:.0f}"
             
-        # Pattern 1: Multiple Alpha Traders activity
-        alpha_pattern = self._check_alpha_pattern(token_txs)
-        if alpha_pattern:
-            patterns.append(alpha_pattern)
+            # Header
+            message = (
+                f"🔥 <b>CONFLUENCE DETECTED</b>\n\n"
+                f"🪙 <b>${token_symbol}</b> | MCap: {mcap_str}\n"
+                f"📜 <code>{token_address}</code>\n\n"
+            )
             
-        # Pattern 2: Alpha Traders followed by Volume Leaders or Steady Elite
-        sequence_pattern = self._check_sequence_pattern(token_txs)
-        if sequence_pattern:
-            patterns.append(sequence_pattern)
+            # Add confluence patterns
+            message += "<b>Confluence Patterns:</b>\n"
+            for pattern in patterns:
+                message += f"   {pattern}\n"
+            message += "\n"
             
-        # Pattern 3: Multiple trader types buying
-        diversity_pattern = self._check_diversity_pattern(token_txs)
-        if diversity_pattern:
-            patterns.append(diversity_pattern)
-            
-        return patterns
-        
-    def _check_alpha_pattern(self, transactions: List[dict]) -> str:
-        """Check for multiple Alpha Traders activity"""
-        last_hour = datetime.now() - timedelta(hours=1)
-        recent_txs = [tx for tx in transactions if tx['timestamp'] > last_hour]
-        
-        alpha_buyers = set(
-            tx['wallet'] for tx in recent_txs
-            if tx['trader_type'] == 'Alpha Traders' and tx['action'] == 'buy'
-        )
-        
-        alpha_sellers = set(
-            tx['wallet'] for tx in recent_txs
-            if tx['trader_type'] == 'Alpha Traders' and tx['action'] == 'sell'
-        )
-        
-        if len(alpha_buyers) >= 2:
-            return f"🎯 Multiple Alpha Traders ({len(alpha_buyers)}) buying in last hour"
-        elif len(alpha_sellers) >= 2:
-            return f"⚠️ Multiple Alpha Traders ({len(alpha_sellers)}) selling in last hour"
-            
-        return None
-        
-    def _check_sequence_pattern(self, transactions: List[dict]) -> str:
-        """Check for Alpha Traders followed by Volume Leaders or Steady Elite"""
-        last_4h = datetime.now() - timedelta(hours=4)
-        recent_txs = [tx for tx in transactions if tx['timestamp'] > last_4h]
-        
-        # Look for early Alpha Traders buys
-        alpha_buy_time = None
-        for tx in recent_txs:
-            if tx['trader_type'] == 'Alpha Traders' and tx['action'] == 'buy':
-                alpha_buy_time = tx['timestamp']
-                break
+            # Add wallet details with GMGN links
+            if recent_txs:
+                message += "<b>Recent Activity (30min):</b>\n"
                 
-        if alpha_buy_time:
-            subsequent_buyers = {
-                tx['trader_type']: tx['wallet']
-                for tx in recent_txs
-                if tx['timestamp'] > alpha_buy_time 
-                and tx['trader_type'] in ['Volume Leaders', 'Steady Elite']
-                and tx['action'] == 'buy'
-            }
-            
-            if len(subsequent_buyers) >= 2:
-                follower_types = ', '.join(subsequent_buyers.keys())
-                return f"🎯 Alpha Traders entry followed by {follower_types}"
+                # Group transactions by action
+                buyers = [tx for tx in recent_txs if tx['action'] == 'buy']
+                sellers = [tx for tx in recent_txs if tx['action'] == 'sell']
                 
-        return None
-        
-    def _check_diversity_pattern(self, transactions: List[dict]) -> str:
-        """Check for diverse trader types buying"""
-        last_2h = datetime.now() - timedelta(hours=2)
-        recent_txs = [tx for tx in transactions if tx['timestamp'] > last_2h]
-        
-        buyer_types = set(
-            tx['trader_type'] for tx in recent_txs
-            if tx['action'] == 'buy'
-            and tx['trader_type'] in ['Alpha Traders', 'Volume Leaders', 'Steady Elite']
-        )
-        
-        if len(buyer_types) >= 2:  # Changed to 2 since we now have 3 specific types
-            return f"💫 Multiple trader types buying ({', '.join(buyer_types)})"
+                if buyers:
+                    message += "🟢 <b>Buyers:</b>\n"
+                    for tx in buyers[-3:]:  # Show last 3 buyers
+                        wallet = tx['wallet']
+                        short_wallet = f"{wallet[:4]}...{wallet[-4:]}"
+                        gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
+                        trader_type = tx.get('trader_type', 'Unknown')
+                        amount_usd = tx.get('amount_usd', 0)
+                        message += f"   <a href='{gmgn_link}'>{short_wallet}</a> ({trader_type}) ${amount_usd:,.0f}\n"
+                    message += "\n"
+                
+                if sellers:
+                    message += "🔴 <b>Sellers:</b>\n"
+                    for tx in sellers[-3:]:  # Show last 3 sellers
+                        wallet = tx['wallet']
+                        short_wallet = f"{wallet[:4]}...{wallet[-4:]}"
+                        gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
+                        trader_type = tx.get('trader_type', 'Unknown')
+                        amount_usd = tx.get('amount_usd', 0)
+                        message += f"   <a href='{gmgn_link}'>{short_wallet}</a> ({trader_type}) ${amount_usd:,.0f}\n"
+                    message += "\n"
             
-        return None
+            # Add cost basis analysis if available
+            if confluence_analysis and confluence_analysis.get('buyer_analysis'):
+                buyer_analysis = confluence_analysis['buyer_analysis']
+                if buyer_analysis.get('avg_entry_market_cap'):
+                    avg_entry_mcap = buyer_analysis['avg_entry_market_cap']
+                    profit_multiple = buyer_analysis.get('profit_multiple', 0)
+                    
+                    if avg_entry_mcap >= 1_000_000:
+                        entry_str = f"${avg_entry_mcap/1_000_000:.1f}M"
+                    else:
+                        entry_str = f"${avg_entry_mcap/1_000:.0f}K"
+                        
+                    message += f"📊 <b>Buyer Cost Basis:</b>\n"
+                    message += f"   Avg Entry MCap: {entry_str}\n"
+                    message += f"   Current vs Entry: {profit_multiple:.2f}x\n\n"
+            
+            if confluence_analysis and confluence_analysis.get('seller_analysis'):
+                seller_analysis = confluence_analysis['seller_analysis']
+                if seller_analysis.get('avg_exit_market_cap'):
+                    avg_exit_mcap = seller_analysis['avg_exit_market_cap']
+                    vs_current = seller_analysis.get('vs_current_multiple', 0)
+                    
+                    if avg_exit_mcap >= 1_000_000:
+                        exit_str = f"${avg_exit_mcap/1_000_000:.1f}M"
+                    else:
+                        exit_str = f"${avg_exit_mcap/1_000:.0f}K"
+                        
+                    message += f"📊 <b>Seller Cost Basis:</b>\n"
+                    message += f"   Avg Exit MCap: {exit_str}\n"
+                    message += f"   Exit vs Current: {vs_current:.2f}x\n\n"
+            
+            # Add links for further analysis
+            message += f"<b>Links:</b>\n"
+            message += f"GMGN: https://gmgn.ai/sol/token/{token_address}\n"
+            message += f"Birdeye: https://birdeye.so/token/{token_address}?chain=solana"
+            
+            return message
+            
+        except Exception as e:
+            logger.error(f"Error formatting confluence notification: {e}")
+            return f"🔥 CONFLUENCE DETECTED for {trigger_tx.get('token_symbol', 'Unknown')}\n{chr(10).join(patterns)}"
