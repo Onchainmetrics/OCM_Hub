@@ -9,7 +9,6 @@ import aiohttp
 import os
 from dotenv import load_dotenv
 from src.services.price_service import PriceService
-from src.services.cost_basis_service import CostBasisService
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,6 @@ class AlphaTracker:
         self.pattern_detector = None
         self.telegram_bot = None  # Will be set from main bot instance
         self.price_service = PriceService()
-        self.cost_basis_service = CostBasisService()
         
     async def get_current_webhook(self) -> List[str]:
         """Get current webhook configuration"""
@@ -254,19 +252,7 @@ class AlphaTracker:
                         'signature': tx_data.get('signature', '')
                     }
                     
-                    # Record transaction for cost basis tracking
-                    try:
-                        if current_market_cap and current_market_cap > 0:
-                            await self.cost_basis_service.record_transaction(
-                                wallet_address,
-                                token_address,
-                                'buy' if is_buy else 'sell',
-                                token_amount,
-                                current_market_cap,
-                                parsed_tx['timestamp']
-                            )
-                    except Exception as e:
-                        logger.error(f"Error recording cost basis: {e}")
+                    # Cost basis tracking removed - focus on confluence detection only
                     
                     parsed_transactions.append(parsed_tx)
                     
@@ -289,6 +275,22 @@ class AlphaTracker:
             for swap_data in transactions:
                 wallet = swap_data['wallet_address']
                 token = swap_data['token_address']
+                usd_value = swap_data.get('usd_value', 0)
+                
+                # Filter out low-value transactions (minimum $100)
+                if usd_value < 100:
+                    logger.debug(f"Skipping transaction below $100 threshold: {wallet[:8]}... ${usd_value:.2f}")
+                    continue
+                
+                # Filter out stablecoins and common tokens that shouldn't trigger confluence
+                excluded_tokens = {
+                    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+                    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+                    'So11111111111111111111111111111111111111112',   # Wrapped SOL
+                }
+                if token in excluded_tokens:
+                    logger.debug(f"Skipping excluded token: {token[:8]}...")
+                    continue
                 
                 # Check if wallet is in trader profiles
                 trader_profile = self.trader_profiles.get(wallet, {})
@@ -313,18 +315,10 @@ class AlphaTracker:
                     try:
                         # Get all wallets involved in recent transactions for this token
                         recent_txs = await self.pattern_detector._get_recent_transactions(swap_data['token_address'])
-                        involved_wallets = list(set(tx['wallet'] for tx in recent_txs))
                         
-                        # Get cost basis analysis for confluence
-                        confluence_analysis = await self.cost_basis_service.analyze_confluence_cost_basis(
-                            involved_wallets,
-                            swap_data['token_address'],
-                            swap_data.get('current_market_cap', 0)
-                        )
-                        
-                        # Format confluence notification
+                        # Format confluence notification (no cost basis analysis)
                         message = await self.format_confluence_notification(
-                            swap_data, patterns, confluence_analysis, recent_txs
+                            swap_data, patterns, recent_txs
                         )
                         
                         # Send to Telegram
@@ -332,16 +326,17 @@ class AlphaTracker:
                         
                     except Exception as e:
                         logger.error(f"Error processing confluence notification: {e}")
-                        # Send basic confluence alert as fallback
-                        basic_message = f"🔥 <b>CONFLUENCE DETECTED</b>\n\n" + "\n".join(patterns)
-                        await self.send_to_telegram(basic_message)
+                        # Log the error but don't send fallback notifications to avoid spam
+                        logger.warning(f"Skipping confluence notification due to processing error for token {token[:8]}...")
             
         except Exception as e:
             logger.error(f"Error handling webhook: {e}")
             
     async def send_to_telegram(self, message: str):
-        """Send confluence notification to Telegram"""
+        """Send confluence notification to Telegram with rate limiting"""
         try:
+            # Add delay to avoid rate limiting
+            await asyncio.sleep(1)  # 1 second delay between messages
             if not self.telegram_bot:
                 logger.error("Telegram bot not initialized")
                 return
@@ -360,15 +355,35 @@ class AlphaTracker:
             )
             
         except Exception as e:
-            logger.error(f"Error sending Telegram notification: {e}")
+            error_msg = str(e)
+            if "Flood control exceeded" in error_msg or "429" in error_msg:
+                logger.warning(f"Telegram rate limit hit, skipping notification: {e}")
+                # Don't retry to avoid making the problem worse
+            elif "Timed out" in error_msg:
+                logger.warning(f"Telegram timeout, skipping notification: {e}")
+                # Don't retry timeouts to avoid backlog
+            else:
+                logger.error(f"Error sending Telegram notification: {e}")
 
     async def format_confluence_notification(self, trigger_tx: dict, patterns: list, 
-                                           confluence_analysis: dict, recent_txs: list) -> str:
+                                           recent_txs: list) -> str:
         """Format confluence notification with detailed analysis"""
         try:
             token_symbol = trigger_tx['token_symbol']
             token_address = trigger_tx['token_address']
             current_market_cap = trigger_tx.get('current_market_cap', 0)
+            
+            # If market cap is 0, get it from the most recent transaction
+            if current_market_cap == 0 and recent_txs:
+                logger.warning(f"Current market cap is 0 for {token_address[:8]}..., trying to get from recent transactions")
+                # Try to get market cap from the latest transaction
+                for tx in reversed(recent_txs):
+                    if tx.get('market_cap', 0) > 0:
+                        current_market_cap = tx['market_cap']
+                        logger.info(f"Found market cap from recent tx: {current_market_cap}")
+                        break
+                if current_market_cap == 0:
+                    logger.warning(f"Still no market cap found for {token_address[:8]}... from recent transactions")
             
             # Format market cap
             if current_market_cap >= 1_000_000_000:
@@ -397,63 +412,43 @@ class AlphaTracker:
             if recent_txs:
                 message += "<b>Recent Activity (30min):</b>\n"
                 
-                # Group transactions by action
-                buyers = [tx for tx in recent_txs if tx['action'] == 'buy']
-                sellers = [tx for tx in recent_txs if tx['action'] == 'sell']
+                # Group and aggregate transactions by wallet and action
+                from collections import defaultdict
                 
+                wallet_aggregation = defaultdict(lambda: {'buy': 0, 'sell': 0, 'trader_type': 'Unknown'})
+                
+                for tx in recent_txs:
+                    wallet = tx['wallet']
+                    action = tx['action']
+                    amount_usd = tx.get('amount_usd', 0)
+                    trader_type = tx.get('trader_type', 'Unknown')
+                    
+                    wallet_aggregation[wallet][action] += amount_usd
+                    wallet_aggregation[wallet]['trader_type'] = trader_type
+                
+                # Show buyers (wallets with buy activity)
+                buyers = {w: data for w, data in wallet_aggregation.items() if data['buy'] > 0}
                 if buyers:
                     message += "🟢 <b>Buyers:</b>\n"
-                    for tx in buyers[-3:]:  # Show last 3 buyers
-                        wallet = tx['wallet']
+                    for wallet, data in list(buyers.items())[:3]:  # Show top 3 buyers
                         short_wallet = f"{wallet[:4]}...{wallet[-4:]}"
                         gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
-                        trader_type = tx.get('trader_type', 'Unknown')
-                        amount_usd = tx.get('amount_usd', 0)
-                        message += f"   <a href='{gmgn_link}'>{short_wallet}</a> ({trader_type}) ${amount_usd:,.0f}\n"
+                        trader_type = data['trader_type']
+                        buy_amount = data['buy']
+                        message += f"   <a href='{gmgn_link}'>{short_wallet}</a> ({trader_type}) ${buy_amount:,.0f}\n"
                     message += "\n"
                 
+                # Show sellers (wallets with sell activity)
+                sellers = {w: data for w, data in wallet_aggregation.items() if data['sell'] > 0}
                 if sellers:
                     message += "🔴 <b>Sellers:</b>\n"
-                    for tx in sellers[-3:]:  # Show last 3 sellers
-                        wallet = tx['wallet']
+                    for wallet, data in list(sellers.items())[:3]:  # Show top 3 sellers
                         short_wallet = f"{wallet[:4]}...{wallet[-4:]}"
                         gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet}"
-                        trader_type = tx.get('trader_type', 'Unknown')
-                        amount_usd = tx.get('amount_usd', 0)
-                        message += f"   <a href='{gmgn_link}'>{short_wallet}</a> ({trader_type}) ${amount_usd:,.0f}\n"
+                        trader_type = data['trader_type']
+                        sell_amount = data['sell']
+                        message += f"   <a href='{gmgn_link}'>{short_wallet}</a> ({trader_type}) ${sell_amount:,.0f}\n"
                     message += "\n"
-            
-            # Add cost basis analysis if available
-            if confluence_analysis and confluence_analysis.get('buyer_analysis'):
-                buyer_analysis = confluence_analysis['buyer_analysis']
-                if buyer_analysis.get('avg_entry_market_cap'):
-                    avg_entry_mcap = buyer_analysis['avg_entry_market_cap']
-                    profit_multiple = buyer_analysis.get('profit_multiple', 0)
-                    
-                    if avg_entry_mcap >= 1_000_000:
-                        entry_str = f"${avg_entry_mcap/1_000_000:.1f}M"
-                    else:
-                        entry_str = f"${avg_entry_mcap/1_000:.0f}K"
-                        
-                    message += f"📊 <b>Buyer Cost Basis:</b>\n"
-                    message += f"   Avg Entry MCap: {entry_str}\n"
-                    message += f"   Current vs Entry: {profit_multiple:.2f}x\n\n"
-            
-            if confluence_analysis and confluence_analysis.get('seller_analysis'):
-                seller_analysis = confluence_analysis['seller_analysis']
-                if seller_analysis.get('avg_exit_market_cap'):
-                    avg_exit_mcap = seller_analysis['avg_exit_market_cap']
-                    vs_current = seller_analysis.get('vs_current_multiple', 0)
-                    
-                    if avg_exit_mcap >= 1_000_000:
-                        exit_str = f"${avg_exit_mcap/1_000_000:.1f}M"
-                    else:
-                        exit_str = f"${avg_exit_mcap/1_000:.0f}K"
-                        
-                    message += f"📊 <b>Seller Cost Basis:</b>\n"
-                    message += f"   Avg Exit MCap: {exit_str}\n"
-                    message += f"   Exit vs Current: {vs_current:.2f}x\n\n"
-            
             # Add links for further analysis
             message += f"<b>Links:</b>\n"
             message += f"GMGN: https://gmgn.ai/sol/token/{token_address}\n"

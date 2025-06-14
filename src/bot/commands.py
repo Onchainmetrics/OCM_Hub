@@ -310,19 +310,10 @@ async def test_confluence_command(update: Update, context: ContextTypes.DEFAULT_
                     # Get recent transactions for this token
                     recent_txs = await alpha_tracker.pattern_detector._get_recent_transactions(test_token)
                     
-                    # Get involved wallets for cost basis analysis
-                    involved_wallets = list(set(tx['wallet'] for tx in recent_txs))
                     
-                    # Get cost basis analysis
-                    confluence_analysis = await alpha_tracker.cost_basis_service.analyze_confluence_cost_basis(
-                        involved_wallets,
-                        test_token,
-                        test_tx['current_market_cap']
-                    )
-                    
-                    # Use the full confluence notification format
+                    # Use the full confluence notification format (no cost basis)
                     message = await alpha_tracker.format_confluence_notification(
-                        test_tx, patterns, confluence_analysis, recent_txs
+                        test_tx, patterns, recent_txs
                     )
                     
                     await update.message.reply_text(message, parse_mode='HTML')
@@ -365,12 +356,8 @@ async def test_confluence_command(update: Update, context: ContextTypes.DEFAULT_
                 try:
                     test_tx['current_market_cap'] = 4_450_000  # $4.45M
                     recent_txs = await alpha_tracker.pattern_detector._get_recent_transactions(test_token)
-                    involved_wallets = list(set(tx['wallet'] for tx in recent_txs))
-                    confluence_analysis = await alpha_tracker.cost_basis_service.analyze_confluence_cost_basis(
-                        involved_wallets, test_token, test_tx['current_market_cap']
-                    )
                     message = await alpha_tracker.format_confluence_notification(
-                        test_tx, patterns, confluence_analysis, recent_txs
+                        test_tx, patterns, recent_txs
                     )
                     await update.message.reply_text(message, parse_mode='HTML')
                 except Exception as e:

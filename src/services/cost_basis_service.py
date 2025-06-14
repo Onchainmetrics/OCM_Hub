@@ -158,24 +158,30 @@ class CostBasisService:
             if buyers:
                 entry_mcaps = [b["avg_entry_mcap"] for b in buyers if b["avg_entry_mcap"]]
                 if entry_mcaps:
+                    avg_entry_mcap = sum(entry_mcaps) / len(entry_mcaps)
+                    profit_multiple = current_market_cap / avg_entry_mcap if avg_entry_mcap > 0 and current_market_cap > 0 else 0
+                    
+                    logger.info(f"Buyer analysis for {token_address[:8]}...: current_mcap={current_market_cap}, avg_entry_mcap={avg_entry_mcap}, profit_multiple={profit_multiple}")
+                    
                     analysis["buyer_analysis"] = {
                         "count": len(buyers),
-                        "avg_entry_market_cap": sum(entry_mcaps) / len(entry_mcaps),
+                        "avg_entry_market_cap": avg_entry_mcap,
                         "min_entry_market_cap": min(entry_mcaps),
                         "max_entry_market_cap": max(entry_mcaps),
-                        "profit_multiple": current_market_cap / (sum(entry_mcaps) / len(entry_mcaps)) if entry_mcaps else 0
+                        "profit_multiple": profit_multiple
                     }
                     
             # Analyze sellers  
             if sellers:
                 exit_mcaps = [s["avg_exit_mcap"] for s in sellers if s["avg_exit_mcap"]]
                 if exit_mcaps:
+                    avg_exit_mcap = sum(exit_mcaps) / len(exit_mcaps)
                     analysis["seller_analysis"] = {
                         "count": len(sellers),
-                        "avg_exit_market_cap": sum(exit_mcaps) / len(exit_mcaps),
+                        "avg_exit_market_cap": avg_exit_mcap,
                         "min_exit_market_cap": min(exit_mcaps),
                         "max_exit_market_cap": max(exit_mcaps),
-                        "vs_current_multiple": (sum(exit_mcaps) / len(exit_mcaps)) / current_market_cap if exit_mcaps else 0
+                        "vs_current_multiple": avg_exit_mcap / current_market_cap if current_market_cap > 0 and avg_exit_mcap > 0 else 0
                     }
                     
             return analysis

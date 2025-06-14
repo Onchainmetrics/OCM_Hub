@@ -158,22 +158,29 @@ class PriceService:
                 return {"price_per_token": 0, "market_cap": 0, "supply": 0, "decimals": 9, "symbol": "Unknown"}
             
             # Calculate price per token from this transaction
-            if token_amount > 0 and sol_amount > 0:
+            if token_amount > 0 and sol_amount > 0 and sol_price > 0:
                 price_per_token = (sol_amount * sol_price) / token_amount
             else:
                 price_per_token = 0
+                logger.warning(f"Cannot calculate price for {token_address[:8]}...: token_amount={token_amount}, sol_amount={sol_amount}, sol_price={sol_price}")
                 
             # Calculate market cap
-            if price_per_token > 0 and metadata.get("supply"):
-                decimals = metadata.get("decimals", 9)
-                raw_supply = float(metadata["supply"])
-                actual_supply = raw_supply / (10 ** decimals)
-                market_cap = price_per_token * actual_supply
-                
-                logger.info(f"Market cap calculation for {metadata.get('symbol', 'Unknown')} ({token_address[:8]}...): "
-                          f"price=${price_per_token:.8f}, supply={actual_supply:,.0f}, mcap=${market_cap:,.2f}")
+            supply = metadata.get("supply")
+            if price_per_token > 0 and supply is not None and supply > 0:
+                try:
+                    decimals = metadata.get("decimals", 9)
+                    raw_supply = float(supply)
+                    actual_supply = raw_supply / (10 ** decimals)
+                    market_cap = price_per_token * actual_supply
+                    
+                    logger.info(f"Market cap calculation for {metadata.get('symbol', 'Unknown')} ({token_address[:8]}...): "
+                              f"price=${price_per_token:.8f}, raw_supply={raw_supply:,.0f}, actual_supply={actual_supply:,.0f}, mcap=${market_cap:,.2f}")
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Error converting supply to float for {token_address[:8]}...: supply={supply}, error={e}")
+                    market_cap = 0
             else:
                 market_cap = 0
+                logger.warning(f"Cannot calculate market cap for {token_address[:8]}...: price_per_token={price_per_token}, supply={supply}")
                 
             return {
                 "price_per_token": price_per_token,

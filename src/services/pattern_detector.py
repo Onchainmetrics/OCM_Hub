@@ -97,7 +97,8 @@ class PatternDetector:
             'action': 'buy' if transaction['is_buy'] else 'sell',
             'amount_usd': transaction['usd_value'],
             'trader_type': trader_type,
-            'token_symbol': transaction.get('token_symbol', 'Unknown')
+            'token_symbol': transaction.get('token_symbol', 'Unknown'),
+            'market_cap': transaction.get('current_market_cap', 0)
         })
         
         # Check patterns for THIS SPECIFIC TOKEN only
@@ -170,16 +171,24 @@ class PatternDetector:
                 tx['amount_usd'] for tx in recent_txs
                 if tx['trader_type'] in alpha_trader_types and tx['action'] == 'buy'
             )
-            wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_buyers)[:3]]
-            return f"🔥 {len(alpha_buyers)} Alpha wallets BUYING ${token_symbol} (${total_volume:,.0f})\n   Wallets: {', '.join(wallet_previews)}"
+            # Require minimum $1000 in total volume for confluence
+            if total_volume >= 1000:
+                wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_buyers)[:3]]
+                return f"🔥 {len(alpha_buyers)} Alpha wallets BUYING ${token_symbol} (${total_volume:,.0f})\n   Wallets: {', '.join(wallet_previews)}"
+            else:
+                logger.info(f"Alpha buyer confluence below $1000 threshold: ${total_volume:.0f}")
             
         elif len(alpha_sellers) >= 2:
             total_volume = sum(
                 tx['amount_usd'] for tx in recent_txs
                 if tx['trader_type'] in alpha_trader_types and tx['action'] == 'sell'
             )
-            wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_sellers)[:3]]
-            return f"🚨 {len(alpha_sellers)} Alpha wallets SELLING ${token_symbol} (${total_volume:,.0f})\n   Wallets: {', '.join(wallet_previews)}"
+            # Require minimum $1000 in total volume for confluence
+            if total_volume >= 1000:
+                wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_sellers)[:3]]
+                return f"🚨 {len(alpha_sellers)} Alpha wallets SELLING ${token_symbol} (${total_volume:,.0f})\n   Wallets: {', '.join(wallet_previews)}"
+            else:
+                logger.info(f"Alpha seller confluence below $1000 threshold: ${total_volume:.0f}")
             
         return None
         
