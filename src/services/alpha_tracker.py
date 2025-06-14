@@ -335,8 +335,8 @@ class AlphaTracker:
     async def send_to_telegram(self, message: str):
         """Send confluence notification to Telegram with rate limiting"""
         try:
-            # Add delay to avoid rate limiting
-            await asyncio.sleep(1)  # 1 second delay between messages
+            # Add longer delay to avoid rate limiting and implement retry logic
+            await asyncio.sleep(3)  # 3 second delay between messages
             if not self.telegram_bot:
                 logger.error("Telegram bot not initialized")
                 return
@@ -347,12 +347,28 @@ class AlphaTracker:
                 logger.error("ALPHA_NOTIFICATIONS_CHAT_ID not configured")
                 return
                 
-            await self.telegram_bot.send_message(
-                chat_id=chat_id,
-                text=message,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
+            # Implement retry logic for rate limiting
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    await self.telegram_bot.send_message(
+                        chat_id=chat_id,
+                        text=message,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
+                    )
+                    logger.info(f"Telegram message sent successfully on attempt {attempt + 1}")
+                    break
+                except Exception as send_error:
+                    error_msg = str(send_error)
+                    if "Flood control exceeded" in error_msg or "429" in error_msg:
+                        wait_time = min(30, (attempt + 1) * 10)  # 10, 20, 30 seconds
+                        logger.warning(f"Rate limit hit on attempt {attempt + 1}, waiting {wait_time}s before retry")
+                        if attempt < max_retries - 1:  # Don't wait on last attempt
+                            await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        raise send_error  # Re-raise non-rate-limit errors
             
         except Exception as e:
             error_msg = str(e)
@@ -373,17 +389,20 @@ class AlphaTracker:
             token_address = trigger_tx['token_address']
             current_market_cap = trigger_tx.get('current_market_cap', 0)
             
-            # If market cap is 0, get it from the most recent transaction
-            if current_market_cap == 0 and recent_txs:
-                logger.warning(f"Current market cap is 0 for {token_address[:8]}..., trying to get from recent transactions")
-                # Try to get market cap from the latest transaction
-                for tx in reversed(recent_txs):
-                    if tx.get('market_cap', 0) > 0:
-                        current_market_cap = tx['market_cap']
-                        logger.info(f"Found market cap from recent tx: {current_market_cap}")
-                        break
-                if current_market_cap == 0:
-                    logger.warning(f"Still no market cap found for {token_address[:8]}... from recent transactions")
+            # If market cap is unreliable, calculate median from recent transactions to avoid outliers
+            if (current_market_cap == 0 or current_market_cap > 1_000_000_000) and recent_txs:
+                logger.warning(f"Market cap seems unreliable ({current_market_cap}) for {token_address[:8]}..., calculating median from recent transactions")
+                
+                # Get market caps from recent transactions, excluding outliers
+                recent_mcaps = [tx.get('market_cap', 0) for tx in recent_txs if tx.get('market_cap', 0) > 0]
+                if recent_mcaps:
+                    # Use median to avoid extreme outliers from MEV/slippage
+                    recent_mcaps.sort()
+                    median_mcap = recent_mcaps[len(recent_mcaps) // 2]
+                    current_market_cap = median_mcap
+                    logger.info(f"Using median market cap from {len(recent_mcaps)} transactions: ${median_mcap:,.0f}")
+                else:
+                    logger.warning(f"No valid market cap found in recent transactions")
             
             # Format market cap
             if current_market_cap >= 1_000_000_000:
@@ -410,7 +429,7 @@ class AlphaTracker:
             
             # Add wallet details with GMGN links
             if recent_txs:
-                message += "<b>Recent Activity (30min):</b>\n"
+                message += "<b>Recent Activity (1h):</b>\n"
                 
                 # Group and aggregate transactions by wallet and action
                 from collections import defaultdict

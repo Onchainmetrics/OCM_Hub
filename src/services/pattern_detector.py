@@ -43,7 +43,7 @@ class PatternDetector:
                 
         return self.token_metadata.get(token_address, {})
         
-    async def _get_recent_transactions(self, token_address: str, hours: int = 4) -> List[dict]:
+    async def _get_recent_transactions(self, token_address: str, hours: int = 1) -> List[dict]:
         """Get recent transactions for a specific token from Redis"""
         cache_key = f"token_transactions:{token_address}"
         transactions = await self.cache.get(cache_key)
@@ -75,12 +75,12 @@ class PatternDetector:
             'token_symbol': transaction.get('token_symbol', 'Unknown')
         })
         
-        # Keep only last 50 transactions per token to avoid memory issues
-        if len(transactions) > 50:
-            transactions = transactions[-50:]
+        # Keep only last 200 transactions per token
+        if len(transactions) > 200:
+            transactions = transactions[-200:]
         
-        # Store with 4h expiration
-        await self.cache.set(cache_key, transactions, expire_minutes=240)
+        # Store with 1h expiration (matches confluence detection window)
+        await self.cache.set(cache_key, transactions, expire_minutes=60)
         
     async def add_transaction(self, transaction: dict) -> List[str]:
         """Add transaction and return any detected confluence patterns for this specific token"""
@@ -137,13 +137,13 @@ class PatternDetector:
         
     def _check_alpha_confluence(self, transactions: List[dict], token_symbol: str) -> str:
         """Check for multiple Alpha traders acting on the SAME TOKEN (confluence)"""
-        last_30_min = datetime.now() - timedelta(minutes=30)
+        last_1_hour = datetime.now() - timedelta(hours=1)
         recent_txs = [
             tx for tx in transactions 
-            if datetime.fromisoformat(tx['timestamp']) > last_30_min
+            if datetime.fromisoformat(tx['timestamp']) > last_1_hour
         ]
         
-        logger.info(f"Checking alpha confluence for {token_symbol}: {len(transactions)} total txs, {len(recent_txs)} recent txs (30min)")
+        logger.info(f"Checking alpha confluence for {token_symbol}: {len(transactions)} total txs, {len(recent_txs)} recent txs (1h)")
         
         # Log all recent transactions for debugging
         for tx in recent_txs:
@@ -164,31 +164,35 @@ class PatternDetector:
         
         logger.info(f"Alpha confluence check for {token_symbol}: {len(alpha_buyers)} buyers, {len(alpha_sellers)} sellers")
         
-        # CONFLUENCE: Multiple different alpha wallets on SAME token
+        # CONFLUENCE: Check for significant net flow in either direction
         logger.info(f"Alpha buyers for {token_symbol}: {alpha_buyers}, Alpha sellers: {alpha_sellers}")
-        if len(alpha_buyers) >= 2:
-            total_volume = sum(
-                tx['amount_usd'] for tx in recent_txs
-                if tx['trader_type'] in alpha_trader_types and tx['action'] == 'buy'
-            )
-            # Require minimum $1000 in total volume for confluence
-            if total_volume >= 1000:
+        
+        # Calculate buy and sell volumes
+        buy_volume = sum(
+            tx['amount_usd'] for tx in recent_txs
+            if tx['trader_type'] in alpha_trader_types and tx['action'] == 'buy'
+        )
+        sell_volume = sum(
+            tx['amount_usd'] for tx in recent_txs
+            if tx['trader_type'] in alpha_trader_types and tx['action'] == 'sell'
+        )
+        
+        # Calculate net flow (positive = net buying, negative = net selling)
+        net_flow = buy_volume - sell_volume
+        logger.info(f"Flow analysis for {token_symbol}: ${buy_volume:,.0f} buys, ${sell_volume:,.0f} sells, net: ${net_flow:,.0f}")
+        
+        # Check for confluence with minimum $5000 net flow
+        if abs(net_flow) >= 5000:
+            if net_flow > 0 and len(alpha_buyers) >= 2:
+                # Net buying with multiple buyers
                 wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_buyers)[:3]]
-                return f"🔥 {len(alpha_buyers)} Alpha wallets BUYING ${token_symbol} (${total_volume:,.0f})\n   Wallets: {', '.join(wallet_previews)}"
-            else:
-                logger.info(f"Alpha buyer confluence below $1000 threshold: ${total_volume:.0f}")
-            
-        elif len(alpha_sellers) >= 2:
-            total_volume = sum(
-                tx['amount_usd'] for tx in recent_txs
-                if tx['trader_type'] in alpha_trader_types and tx['action'] == 'sell'
-            )
-            # Require minimum $1000 in total volume for confluence
-            if total_volume >= 1000:
+                return f"🔥 {len(alpha_buyers)} Alpha wallets NET BUYING ${token_symbol} (${net_flow:,.0f} net)\n   Wallets: {', '.join(wallet_previews)}"
+            elif net_flow < 0 and len(alpha_sellers) >= 2:
+                # Net selling with multiple sellers  
                 wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_sellers)[:3]]
-                return f"🚨 {len(alpha_sellers)} Alpha wallets SELLING ${token_symbol} (${total_volume:,.0f})\n   Wallets: {', '.join(wallet_previews)}"
-            else:
-                logger.info(f"Alpha seller confluence below $1000 threshold: ${total_volume:.0f}")
+                return f"🚨 {len(alpha_sellers)} Alpha wallets NET SELLING ${token_symbol} (${abs(net_flow):,.0f} net)\n   Wallets: {', '.join(wallet_previews)}"
+        else:
+            logger.info(f"Net flow ${net_flow:,.0f} below $5000 threshold for {token_symbol}")
             
         return None
         
