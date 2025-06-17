@@ -28,6 +28,13 @@ class AlphaTracker:
         self.telegram_bot = None  # Will be set from main bot instance
         self.price_service = PriceService()
         
+        # Insider Cluster - Track these specific wallets for every swap
+        self.insider_cluster = {
+            'ENyuEqoBjjV4azP1BKzAt6JurhjcdnaZPWo6iDVV8rUZ': 'Insider_cluster_1',
+            '5YAdcB8w487xQsXmtccWXg43WinNQzGsAzvHgkzFhTKx': 'Insider_cluster_2', 
+            'HJj6rPEyHAVffLWVbErA7SSb1uUtgWzMbpwGdXLpuKyD': 'Insider_cluster_3'
+        }
+        
     async def get_current_webhook(self) -> List[str]:
         """Get current webhook configuration"""
         try:
@@ -298,6 +305,19 @@ class AlphaTracker:
                 
                 logger.info(f"Processing swap: {wallet[:8]}... {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'} - Token: {token[:8]}... - Trader Type: {trader_category}")
                 
+                # CRITICAL: Check for Insider Cluster wallets FIRST - we cannot miss these!
+                if wallet in self.insider_cluster:
+                    cluster_label = self.insider_cluster[wallet]
+                    logger.info(f"🚨 INSIDER CLUSTER DETECTED: {cluster_label} - {wallet[:8]}... - {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'}")
+                    
+                    try:
+                        # Create special insider cluster notification
+                        insider_message = await self.format_insider_cluster_notification(swap_data, cluster_label)
+                        await self.send_to_telegram(insider_message)
+                        logger.info(f"Insider cluster notification sent for {cluster_label}")
+                    except Exception as e:
+                        logger.error(f"CRITICAL: Failed to send insider cluster notification for {cluster_label}: {e}")
+                
                 # Check for confluence patterns - this is our PRIMARY PURPOSE
                 patterns = await self.pattern_detector.add_transaction(swap_data)
                 logger.info(f"Pattern detection result for {token[:8]}...: {patterns}")
@@ -341,34 +361,50 @@ class AlphaTracker:
                 logger.error("Telegram bot not initialized")
                 return
                 
-            # Get the configured chat ID for alpha notifications
-            chat_id = os.getenv('ALPHA_NOTIFICATIONS_CHAT_ID')
-            if not chat_id:
-                logger.error("ALPHA_NOTIFICATIONS_CHAT_ID not configured")
+            # Get allowed users for alpha notifications (fallback to ALPHA_NOTIFICATIONS_CHAT_ID)
+            allowed_users = os.getenv('ALLOWED_USERS')
+            fallback_chat_id = os.getenv('ALPHA_NOTIFICATIONS_CHAT_ID')
+            
+            if allowed_users:
+                # Send to all allowed users
+                user_ids = [uid.strip() for uid in allowed_users.split(',') if uid.strip()]
+                logger.info(f"Sending alpha notification to {len(user_ids)} users")
+            elif fallback_chat_id:
+                # Fallback to single chat ID
+                user_ids = [fallback_chat_id]
+                logger.info("Sending alpha notification to fallback chat ID")
+            else:
+                logger.error("Neither ALLOWED_USERS nor ALPHA_NOTIFICATIONS_CHAT_ID configured")
                 return
                 
-            # Implement retry logic for rate limiting
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    await self.telegram_bot.send_message(
-                        chat_id=chat_id,
-                        text=message,
-                        parse_mode='HTML',
-                        disable_web_page_preview=True
-                    )
-                    logger.info(f"Telegram message sent successfully on attempt {attempt + 1}")
-                    break
-                except Exception as send_error:
-                    error_msg = str(send_error)
-                    if "Flood control exceeded" in error_msg or "429" in error_msg:
-                        wait_time = min(30, (attempt + 1) * 10)  # 10, 20, 30 seconds
-                        logger.warning(f"Rate limit hit on attempt {attempt + 1}, waiting {wait_time}s before retry")
-                        if attempt < max_retries - 1:  # Don't wait on last attempt
-                            await asyncio.sleep(wait_time)
-                        continue
-                    else:
-                        raise send_error  # Re-raise non-rate-limit errors
+            # Send to each user with retry logic for rate limiting
+            for user_id in user_ids:
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        await self.telegram_bot.send_message(
+                            chat_id=user_id,
+                            text=message,
+                            parse_mode='HTML',
+                            disable_web_page_preview=True
+                        )
+                        logger.info(f"Telegram message sent successfully to {user_id} on attempt {attempt + 1}")
+                        break
+                    except Exception as send_error:
+                        error_msg = str(send_error)
+                        if "Flood control exceeded" in error_msg or "429" in error_msg:
+                            wait_time = min(30, (attempt + 1) * 10)  # 10, 20, 30 seconds
+                            logger.warning(f"Rate limit hit for {user_id} on attempt {attempt + 1}, waiting {wait_time}s before retry")
+                            if attempt < max_retries - 1:  # Don't wait on last attempt
+                                await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error(f"Failed to send message to {user_id}: {send_error}")
+                            break  # Don't retry non-rate-limit errors
+                
+                # Add delay between users to avoid rate limiting
+                if len(user_ids) > 1:
+                    await asyncio.sleep(1)
             
         except Exception as e:
             error_msg = str(e)
@@ -478,3 +514,54 @@ class AlphaTracker:
         except Exception as e:
             logger.error(f"Error formatting confluence notification: {e}")
             return f"🔥 CONFLUENCE DETECTED for {trigger_tx.get('token_symbol', 'Unknown')}\n{chr(10).join(patterns)}"
+    
+    async def format_insider_cluster_notification(self, swap_data: dict, cluster_label: str) -> str:
+        """Format insider cluster notification with special red alert formatting"""
+        try:
+            token_symbol = swap_data['token_symbol']
+            token_address = swap_data['token_address']
+            wallet_address = swap_data['wallet_address']
+            is_buy = swap_data['is_buy']
+            usd_value = swap_data['usd_value']
+            current_market_cap = swap_data.get('current_market_cap', 0)
+            
+            # Format market cap
+            if current_market_cap >= 1_000_000_000:
+                mcap_str = f"${current_market_cap/1_000_000_000:.2f}B"
+            elif current_market_cap >= 1_000_000:
+                mcap_str = f"${current_market_cap/1_000_000:.1f}M"
+            elif current_market_cap >= 1_000:
+                mcap_str = f"${current_market_cap/1_000:.0f}K"
+            else:
+                mcap_str = f"${current_market_cap:.0f}"
+            
+            # Header with red alert emoji
+            action = "BUYING" if is_buy else "SELLING"
+            message = (
+                f"🚨 <b>INSIDER CLUSTER SIGNAL</b>\n\n"
+                f"🪙 <b>${token_symbol}</b> | MCap: {mcap_str}\n"
+                f"📜 <code>{token_address}</code>\n\n"
+            )
+            
+            # Insider cluster details
+            message += "<b>Insider_Cluster:</b>\n"
+            short_wallet = f"{wallet_address[:4]}...{wallet_address[-4:]}"
+            gmgn_link = f"https://www.gmgn.ai/sol/address/{wallet_address}"
+            message += f"   🎯 <a href='{gmgn_link}'>{cluster_label}</a> {action} ${token_symbol} (${usd_value:,.0f})\n\n"
+            
+            # Transaction details
+            message += "<b>Transaction Details:</b>\n"
+            message += f"   Wallet: <a href='{gmgn_link}'>{short_wallet}</a>\n"
+            message += f"   Action: {action}\n"
+            message += f"   Amount: ${usd_value:,.0f}\n\n"
+            
+            # Add links for further analysis
+            message += f"<b>Links:</b>\n"
+            message += f"GMGN: https://gmgn.ai/sol/token/{token_address}\n"
+            message += f"Birdeye: https://birdeye.so/token/{token_address}?chain=solana"
+            
+            return message
+            
+        except Exception as e:
+            logger.error(f"Error formatting insider cluster notification: {e}")
+            return f"🚨 INSIDER CLUSTER SIGNAL for {cluster_label}: {swap_data.get('token_symbol', 'Unknown')} {swap_data['usd_value']:.0f}"
