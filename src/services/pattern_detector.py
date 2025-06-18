@@ -4,6 +4,8 @@ import logging
 from typing import Dict, List, Set
 from dune_client.query import QueryBase
 from src.services.cache_service import CacheService
+import asyncio
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,33 @@ class PatternDetector:
     async def _get_recent_transactions(self, token_address: str, hours: int = 1) -> List[dict]:
         """Get recent transactions for a specific token from Redis"""
         cache_key = f"token_transactions:{token_address}"
-        transactions = await self.cache.get(cache_key)
+        
+        try:
+            # Try to get from Redis LIST first (new atomic method)
+            if hasattr(self.cache, 'redis') and self.cache.redis:
+                list_key = f"{cache_key}:list"
+                raw_transactions = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.cache.redis.lrange(list_key, 0, -1)
+                )
+                
+                if raw_transactions:
+                    transactions = []
+                    for raw_tx in raw_transactions:
+                        try:
+                            transactions.append(json.loads(raw_tx))
+                        except json.JSONDecodeError:
+                            continue
+                else:
+                    transactions = []
+            else:
+                # Fallback to old method
+                transactions = await self.cache.get(cache_key) or []
+                
+        except Exception as e:
+            logger.error(f"Error getting transactions from Redis LIST: {e}")
+            # Fallback to old method
+            transactions = await self.cache.get(cache_key) or []
         
         if not transactions:
             return []
@@ -59,28 +87,63 @@ class PatternDetector:
         ]
         
     async def _store_transaction(self, token_address: str, transaction: dict):
-        """Store transaction for specific token in Redis"""
+        """Store transaction for specific token in Redis with atomic operations"""
         cache_key = f"token_transactions:{token_address}"
         
-        # Get existing transactions for this token
-        transactions = await self.cache.get(cache_key) or []
-        
-        # Add new transaction
-        transactions.append({
+        transaction_data = {
             'timestamp': datetime.now().isoformat(),
             'wallet': transaction['wallet'],
             'action': transaction['action'],
             'amount_usd': transaction['amount_usd'],
             'trader_type': transaction['trader_type'],
-            'token_symbol': transaction.get('token_symbol', 'Unknown')
-        })
+            'token_symbol': transaction.get('token_symbol', 'Unknown'),
+            'market_cap': transaction.get('market_cap', 0)
+        }
         
-        # Keep only last 200 transactions per token
-        if len(transactions) > 200:
-            transactions = transactions[-200:]
-        
-        # Store with 1h expiration (matches confluence detection window)
-        await self.cache.set(cache_key, transactions, expire_minutes=60)
+        try:
+            # Use atomic Redis operations to avoid race conditions
+            if hasattr(self.cache, 'redis') and self.cache.redis:
+                # Use Redis LIST operations for atomic append
+                list_key = f"{cache_key}:list"
+                
+                # Add new transaction atomically
+                await asyncio.get_event_loop().run_in_executor(
+                    None, 
+                    lambda: self.cache.redis.lpush(list_key, json.dumps(transaction_data))
+                )
+                
+                # Trim to keep only last 200 transactions atomically
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.cache.redis.ltrim(list_key, 0, 199)
+                )
+                
+                # Set expiration
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.cache.redis.expire(list_key, 3600)  # 1 hour
+                )
+                
+            else:
+                # Fallback to non-atomic operations if Redis not available
+                transactions = await self.cache.get(cache_key) or []
+                transactions.append(transaction_data)
+                
+                # Keep only last 200 transactions per token
+                if len(transactions) > 200:
+                    transactions = transactions[-200:]
+                
+                # Store with 1h expiration
+                await self.cache.set(cache_key, transactions, expire_minutes=60)
+                
+        except Exception as e:
+            logger.error(f"Error storing transaction atomically: {e}")
+            # Fallback to original method
+            transactions = await self.cache.get(cache_key) or []
+            transactions.append(transaction_data)
+            if len(transactions) > 200:
+                transactions = transactions[-200:]
+            await self.cache.set(cache_key, transactions, expire_minutes=60)
         
     async def add_transaction(self, transaction: dict) -> List[str]:
         """Add transaction and return any detected confluence patterns for this specific token"""

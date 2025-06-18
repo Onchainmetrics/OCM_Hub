@@ -9,10 +9,50 @@ import aiohttp
 import os
 from dotenv import load_dotenv
 from src.services.price_service import PriceService
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+class TelegramRateLimiter:
+    """Smart rate limiter for Telegram messages"""
+    def __init__(self, max_messages_per_second: int = 3, max_messages_per_minute: int = 20):
+        self.max_per_second = max_messages_per_second
+        self.max_per_minute = max_messages_per_minute
+        self.second_window = deque()
+        self.minute_window = deque()
+        
+    async def wait_if_needed(self):
+        """Wait if we're hitting rate limits"""
+        now = datetime.now()
+        
+        # Clean old entries
+        cutoff_second = now - timedelta(seconds=1)
+        cutoff_minute = now - timedelta(minutes=1)
+        
+        while self.second_window and self.second_window[0] < cutoff_second:
+            self.second_window.popleft()
+            
+        while self.minute_window and self.minute_window[0] < cutoff_minute:
+            self.minute_window.popleft()
+        
+        # Check if we need to wait
+        if len(self.second_window) >= self.max_per_second:
+            wait_time = 1.1  # Wait a bit more than 1 second
+            logger.info(f"Rate limit: waiting {wait_time}s (per-second limit)")
+            await asyncio.sleep(wait_time)
+            
+        elif len(self.minute_window) >= self.max_per_minute:
+            oldest_in_minute = self.minute_window[0]
+            wait_time = 61 - (now - oldest_in_minute).total_seconds()
+            if wait_time > 0:
+                logger.info(f"Rate limit: waiting {wait_time:.1f}s (per-minute limit)")
+                await asyncio.sleep(wait_time)
+        
+        # Record this message
+        self.second_window.append(now)
+        self.minute_window.append(now)
 
 class AlphaTracker:
     def __init__(self, dune_client: DuneClient):
@@ -27,6 +67,7 @@ class AlphaTracker:
         self.pattern_detector = None
         self.telegram_bot = None  # Will be set from main bot instance
         self.price_service = PriceService()
+        self.rate_limiter = TelegramRateLimiter()
         
         # Insider Cluster - Track these specific wallets for every swap
         self.insider_cluster = {
@@ -201,13 +242,18 @@ class AlphaTracker:
                     if not (is_buy or is_sell):
                         continue
                         
-                    # Calculate SOL equivalent from native transfers
+                    # Calculate SOL equivalent from native transfers - DIRECTION MATTERS!
                     sol_amount = 0
-                    for native_transfer in native_transfers:
-                        if native_transfer.get('fromUserAccount') == wallet_address:
-                            sol_amount += native_transfer.get('amount', 0) / 1e9
-                        elif native_transfer.get('toUserAccount') == wallet_address:
-                            sol_amount += native_transfer.get('amount', 0) / 1e9
+                    if is_buy:
+                        # For buys: count SOL going OUT of wallet (spent to buy tokens)
+                        for native_transfer in native_transfers:
+                            if native_transfer.get('fromUserAccount') == wallet_address:
+                                sol_amount += native_transfer.get('amount', 0) / 1e9
+                    elif is_sell:
+                        # For sells: count SOL coming IN to wallet (received from selling tokens)
+                        for native_transfer in native_transfers:
+                            if native_transfer.get('toUserAccount') == wallet_address:
+                                sol_amount += native_transfer.get('amount', 0) / 1e9
                             
                     # Get SOL price (1-hour cached) and calculate market cap from transaction
                     try:
@@ -279,84 +325,93 @@ class AlphaTracker:
             # Process the webhook data - can return multiple transactions
             transactions = await self.parse_helius_webhook(webhook_data)
             
-            for swap_data in transactions:
-                wallet = swap_data['wallet_address']
-                token = swap_data['token_address']
-                usd_value = swap_data.get('usd_value', 0)
+            # Process all transactions concurrently to avoid blocking
+            if transactions:
+                logger.info(f"Processing {len(transactions)} transactions concurrently")
+                tasks = [self._process_single_transaction(swap_data) for swap_data in transactions]
+                await asyncio.gather(*tasks, return_exceptions=True)
+            
+    async def _process_single_transaction(self, swap_data: dict):
+        """Process a single transaction (for concurrent processing)"""
+        try:
+            wallet = swap_data['wallet_address']
+            token = swap_data['token_address']
+            usd_value = swap_data.get('usd_value', 0)
+            
+            # Filter out low-value transactions (minimum $100)
+            if usd_value < 100:
+                logger.debug(f"Skipping transaction below $100 threshold: {wallet[:8]}... ${usd_value:.2f}")
+                return
+            
+            # Filter out stablecoins and common tokens that shouldn't trigger confluence
+            excluded_tokens = {
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
+                'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+                'So11111111111111111111111111111111111111112',   # Wrapped SOL
+            }
+            if token in excluded_tokens:
+                logger.debug(f"Skipping excluded token: {token[:8]}...")
+                return
+            
+            # Check if wallet is in trader profiles
+            trader_profile = self.trader_profiles.get(wallet, {})
+            trader_category = trader_profile.get('category', 'Unknown')
+            
+            logger.info(f"Processing swap: {wallet[:8]}... {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'} - Token: {token[:8]}... - Trader Type: {trader_category}")
+            
+            # CRITICAL: Check for Insider Cluster wallets FIRST - we cannot miss these!
+            if wallet in self.insider_cluster:
+                cluster_label = self.insider_cluster[wallet]
+                logger.info(f"🚨 INSIDER CLUSTER DETECTED: {cluster_label} - {wallet[:8]}... - {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'}")
                 
-                # Filter out low-value transactions (minimum $100)
-                if usd_value < 100:
-                    logger.debug(f"Skipping transaction below $100 threshold: {wallet[:8]}... ${usd_value:.2f}")
-                    continue
-                
-                # Filter out stablecoins and common tokens that shouldn't trigger confluence
-                excluded_tokens = {
-                    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
-                    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
-                    'So11111111111111111111111111111111111111112',   # Wrapped SOL
-                }
-                if token in excluded_tokens:
-                    logger.debug(f"Skipping excluded token: {token[:8]}...")
-                    continue
-                
-                # Check if wallet is in trader profiles
-                trader_profile = self.trader_profiles.get(wallet, {})
-                trader_category = trader_profile.get('category', 'Unknown')
-                
-                logger.info(f"Processing swap: {wallet[:8]}... {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'} - Token: {token[:8]}... - Trader Type: {trader_category}")
-                
-                # CRITICAL: Check for Insider Cluster wallets FIRST - we cannot miss these!
-                if wallet in self.insider_cluster:
-                    cluster_label = self.insider_cluster[wallet]
-                    logger.info(f"🚨 INSIDER CLUSTER DETECTED: {cluster_label} - {wallet[:8]}... - {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'}")
+                try:
+                    # Create special insider cluster notification
+                    insider_message = await self.format_insider_cluster_notification(swap_data, cluster_label)
+                    await self.send_to_telegram(insider_message)
+                    logger.info(f"Insider cluster notification sent for {cluster_label}")
+                except Exception as e:
+                    logger.error(f"CRITICAL: Failed to send insider cluster notification for {cluster_label}: {e}")
+            
+            # Check for confluence patterns - this is our PRIMARY PURPOSE
+            patterns = await self.pattern_detector.add_transaction(swap_data)
+            logger.info(f"Pattern detection result for {token[:8]}...: {patterns}")
+            
+            # Also log trader profiles count for debugging
+            if not hasattr(self, '_logged_profiles_count'):
+                logger.info(f"Total trader profiles loaded: {len(self.trader_profiles)}")
+                alpha_trader_types = ['Insider', 'Alpha Trader', 'Volume Leader', 'Consistent Performer']
+                alpha_count = sum(1 for profile in self.trader_profiles.values() if profile.get('category') in alpha_trader_types)
+                logger.info(f"Alpha traders count: {alpha_count}")
+                self._logged_profiles_count = True
+            
+            # ONLY notify when CONFLUENCE patterns are detected
+            if patterns:
+                try:
+                    # Get all wallets involved in recent transactions for this token
+                    recent_txs = await self.pattern_detector._get_recent_transactions(swap_data['token_address'])
                     
-                    try:
-                        # Create special insider cluster notification
-                        insider_message = await self.format_insider_cluster_notification(swap_data, cluster_label)
-                        await self.send_to_telegram(insider_message)
-                        logger.info(f"Insider cluster notification sent for {cluster_label}")
-                    except Exception as e:
-                        logger.error(f"CRITICAL: Failed to send insider cluster notification for {cluster_label}: {e}")
-                
-                # Check for confluence patterns - this is our PRIMARY PURPOSE
-                patterns = await self.pattern_detector.add_transaction(swap_data)
-                logger.info(f"Pattern detection result for {token[:8]}...: {patterns}")
-                
-                # Also log trader profiles count for debugging
-                if not hasattr(self, '_logged_profiles_count'):
-                    logger.info(f"Total trader profiles loaded: {len(self.trader_profiles)}")
-                    alpha_trader_types = ['Insider', 'Alpha Trader', 'Volume Leader', 'Consistent Performer']
-                    alpha_count = sum(1 for profile in self.trader_profiles.values() if profile.get('category') in alpha_trader_types)
-                    logger.info(f"Alpha traders count: {alpha_count}")
-                    self._logged_profiles_count = True
-                
-                # ONLY notify when CONFLUENCE patterns are detected
-                if patterns:
-                    try:
-                        # Get all wallets involved in recent transactions for this token
-                        recent_txs = await self.pattern_detector._get_recent_transactions(swap_data['token_address'])
-                        
-                        # Format confluence notification (no cost basis analysis)
-                        message = await self.format_confluence_notification(
-                            swap_data, patterns, recent_txs
-                        )
-                        
-                        # Send to Telegram
-                        await self.send_to_telegram(message)
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing confluence notification: {e}")
-                        # Log the error but don't send fallback notifications to avoid spam
-                        logger.warning(f"Skipping confluence notification due to processing error for token {token[:8]}...")
+                    # Format confluence notification (no cost basis analysis)
+                    message = await self.format_confluence_notification(
+                        swap_data, patterns, recent_txs
+                    )
+                    
+                    # Send to Telegram with rate limiting
+                    await self.send_to_telegram(message)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing confluence notification: {e}")
+                    # Log the error but don't send fallback notifications to avoid spam
+                    logger.warning(f"Skipping confluence notification due to processing error for token {token[:8]}...")
             
         except Exception as e:
-            logger.error(f"Error handling webhook: {e}")
+            logger.error(f"Error processing single transaction: {e}")
             
     async def send_to_telegram(self, message: str):
-        """Send confluence notification to Telegram with rate limiting"""
+        """Send confluence notification to Telegram with smart rate limiting"""
         try:
-            # Add longer delay to avoid rate limiting and implement retry logic
-            await asyncio.sleep(3)  # 3 second delay between messages
+            # Use smart rate limiter
+            await self.rate_limiter.wait_if_needed()
+            
             if not self.telegram_bot:
                 logger.error("Telegram bot not initialized")
                 return
@@ -402,9 +457,7 @@ class AlphaTracker:
                             logger.error(f"Failed to send message to {user_id}: {send_error}")
                             break  # Don't retry non-rate-limit errors
                 
-                # Add delay between users to avoid rate limiting
-                if len(user_ids) > 1:
-                    await asyncio.sleep(1)
+                # No delay between users - smart rate limiter handles timing
             
         except Exception as e:
             error_msg = str(e)
@@ -535,10 +588,11 @@ class AlphaTracker:
             else:
                 mcap_str = f"${current_market_cap:.0f}"
             
-            # Header with red alert emoji
+            # Header with red alert emoji and buy/sell indicator
             action = "BUYING" if is_buy else "SELLING"
+            action_emoji = "🟢" if is_buy else "🔴"
             message = (
-                f"🚨 <b>INSIDER CLUSTER SIGNAL</b>\n\n"
+                f"🚨 <b>INSIDER CLUSTER SIGNAL</b> {action_emoji}\n\n"
                 f"🪙 <b>${token_symbol}</b> | MCap: {mcap_str}\n"
                 f"📜 <code>{token_address}</code>\n\n"
             )
