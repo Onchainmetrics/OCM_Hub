@@ -331,6 +331,9 @@ class AlphaTracker:
                 tasks = [self._process_single_transaction(swap_data) for swap_data in transactions]
                 await asyncio.gather(*tasks, return_exceptions=True)
             
+        except Exception as e:
+            logger.error(f"Error handling webhook: {e}")
+            
     async def _process_single_transaction(self, swap_data: dict):
         """Process a single transaction (for concurrent processing)"""
         try:
