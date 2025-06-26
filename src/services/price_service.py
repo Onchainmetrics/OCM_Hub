@@ -37,21 +37,21 @@ class PriceService:
                 logger.info(f"Using cached SOL price: ${self.sol_price_cache}")
                 return self.sol_price_cache
             
-            logger.info("Fetching SOL price from Jupiter API...")
-            sol_address = "So11111111111111111111111111111111111111112"
-            url = f"{self.jupiter_base_url}/price/v2"
-            params = {"ids": sol_address}
+            logger.info("Fetching SOL price from CoinGecko API...")
+            # Switch to CoinGecko free API (no auth required)
+            url = "https://api.coingecko.com/api/v3/simple/price"
+            params = {"ids": "solana", "vs_currencies": "usd"}
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params) as response:
-                    logger.info(f"Jupiter API response status: {response.status}")
+                    logger.info(f"CoinGecko API response status: {response.status}")
                     
                     if response.status == 200:
                         data = await response.json()
-                        logger.debug(f"Jupiter API response: {data}")
+                        logger.debug(f"CoinGecko API response: {data}")
                         
-                        if "data" in data and sol_address in data["data"]:
-                            price = float(data["data"][sol_address]["price"])
+                        if "solana" in data and "usd" in data["solana"]:
+                            price = float(data["solana"]["usd"])
                             logger.info(f"Successfully fetched SOL price: ${price}")
                             
                             # Cache the result for 1 hour
@@ -59,10 +59,10 @@ class PriceService:
                             self.sol_price_timestamp = datetime.now()
                             return price
                         else:
-                            logger.error(f"SOL price not found in Jupiter response: {data}")
+                            logger.error(f"SOL price not found in CoinGecko response: {data}")
                     else:
                         error_text = await response.text()
-                        logger.error(f"Jupiter API error {response.status}: {error_text}")
+                        logger.error(f"CoinGecko API error {response.status}: {error_text}")
                             
         except Exception as e:
             logger.error(f"Error fetching SOL price: {e}")
