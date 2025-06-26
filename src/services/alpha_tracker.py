@@ -254,13 +254,56 @@ class AlphaTracker:
                         for native_transfer in native_transfers:
                             if native_transfer.get('toUserAccount') == wallet_address:
                                 sol_amount += native_transfer.get('amount', 0) / 1e9
+                    
+                    # If no SOL movement detected, check for stablecoin swaps (USDC/USDT)
+                    stablecoin_amount = 0
+                    stablecoin_addresses = {
+                        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
+                        'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'   # USDT
+                    }
+                    
+                    if sol_amount == 0:
+                        # Check for stablecoin transfers in opposite direction to token transfer
+                        for stablecoin_transfer in token_transfers:
+                            stablecoin_mint = stablecoin_transfer.get('mint')
+                            if stablecoin_mint in stablecoin_addresses:
+                                stablecoin_from = stablecoin_transfer.get('fromUserAccount')
+                                stablecoin_to = stablecoin_transfer.get('toUserAccount')
+                                stablecoin_token_amount = stablecoin_transfer.get('tokenAmount', 0)
+                                
+                                # For token BUY: stablecoin should go OUT of wallet
+                                if is_buy and stablecoin_from == wallet_address:
+                                    stablecoin_amount += stablecoin_token_amount
+                                    logger.info(f"Detected stablecoin BUY: {stablecoin_token_amount} stablecoin out for {token_amount} {token_address[:8]}...")
+                                
+                                # For token SELL: stablecoin should come IN to wallet  
+                                elif is_sell and stablecoin_to == wallet_address:
+                                    stablecoin_amount += stablecoin_token_amount
+                                    logger.info(f"Detected stablecoin SELL: {token_amount} {token_address[:8]}... for {stablecoin_token_amount} stablecoin in")
                             
                     # Get SOL price (1-hour cached) and calculate market cap from transaction
                     try:
                         sol_price = await self.price_service.get_sol_price()
                         
-                        if sol_price:
-                            # Calculate USD value of transaction
+                        # Handle stablecoin transactions (sol_amount=0 but stablecoin_amount>0)
+                        if stablecoin_amount > 0:
+                            # For stablecoin swaps: use stablecoin amount directly as USD value (USDC/USDT ≈ $1)
+                            usd_value = stablecoin_amount
+                            logger.info(f"Using stablecoin amount for {token_address[:8]}...: ${stablecoin_amount}")
+                            
+                            # Calculate market cap using stablecoin data
+                            market_data = await self.price_service.calculate_market_cap_from_stablecoin_transaction(
+                                token_address,
+                                stablecoin_amount,
+                                token_amount
+                            )
+                            
+                            token_price = market_data.get('price_per_token', 0)
+                            current_market_cap = market_data.get('market_cap', 0)
+                            token_symbol = market_data.get('symbol', 'Unknown')
+                            
+                        elif sol_price and sol_amount > 0:
+                            # Original SOL-based calculation
                             usd_value = sol_amount * sol_price
                             
                             # Calculate market cap using transaction data and cached metadata
