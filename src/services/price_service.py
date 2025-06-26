@@ -34,28 +34,40 @@ class PriceService:
             # Check 1-hour cache first
             if (self.sol_price_cache and self.sol_price_timestamp and
                 datetime.now() - self.sol_price_timestamp < timedelta(hours=1)):
+                logger.info(f"Using cached SOL price: ${self.sol_price_cache}")
                 return self.sol_price_cache
             
+            logger.info("Fetching SOL price from Jupiter API...")
             sol_address = "So11111111111111111111111111111111111111112"
             url = f"{self.jupiter_base_url}/price/v2"
             params = {"ids": sol_address}
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params) as response:
+                    logger.info(f"Jupiter API response status: {response.status}")
+                    
                     if response.status == 200:
                         data = await response.json()
+                        logger.debug(f"Jupiter API response: {data}")
                         
                         if "data" in data and sol_address in data["data"]:
                             price = float(data["data"][sol_address]["price"])
+                            logger.info(f"Successfully fetched SOL price: ${price}")
                             
                             # Cache the result for 1 hour
                             self.sol_price_cache = price
                             self.sol_price_timestamp = datetime.now()
                             return price
+                        else:
+                            logger.error(f"SOL price not found in Jupiter response: {data}")
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Jupiter API error {response.status}: {error_text}")
                             
         except Exception as e:
             logger.error(f"Error fetching SOL price: {e}")
             
+        logger.warning("SOL price fetch failed, returning None")
         return None
     
     async def get_token_metadata(self, token_address: str) -> Optional[Dict]:

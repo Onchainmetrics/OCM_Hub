@@ -280,14 +280,28 @@ class AlphaTracker:
                             usd_value = sol_amount * 100  # Fallback SOL price
                             token_price = 0
                             current_market_cap = 0
-                            token_symbol = transfer.get('tokenSymbol', 'Unknown')
+                            
+                            # Still fetch token metadata to get correct symbol even without SOL price
+                            try:
+                                metadata = await self.price_service.get_token_metadata(token_address)
+                                token_symbol = metadata.get('symbol', 'Unknown') if metadata else 'Unknown'
+                            except Exception as meta_e:
+                                logger.error(f"Failed to get metadata for {token_address[:8]}...: {meta_e}")
+                                token_symbol = transfer.get('tokenSymbol', 'Unknown')
                             
                     except Exception as e:
                         logger.error(f"Error calculating market cap for {token_address[:8]}...: {e}")
                         usd_value = sol_amount * 100  # Fallback
                         token_price = 0
                         current_market_cap = 0
-                        token_symbol = transfer.get('tokenSymbol', 'Unknown')
+                        
+                        # Still fetch token metadata to get correct symbol even on error
+                        try:
+                            metadata = await self.price_service.get_token_metadata(token_address)
+                            token_symbol = metadata.get('symbol', 'Unknown') if metadata else 'Unknown'
+                        except Exception as meta_e:
+                            logger.error(f"Failed to get metadata for {token_address[:8]}...: {meta_e}")
+                            token_symbol = transfer.get('tokenSymbol', 'Unknown')
                     
                     logger.info(f"Creating parsed transaction: wallet={wallet_address[:8]}..., token={token_address[:8]}..., symbol={token_symbol}, action={'BUY' if is_buy else 'SELL'}, usd_value={usd_value}")
                     
