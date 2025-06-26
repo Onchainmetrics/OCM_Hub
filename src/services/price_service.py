@@ -97,7 +97,7 @@ class PriceService:
                             content = result.get("content", {})
                             
                             metadata = {
-                                "symbol": token_info.get("symbol", content.get("metadata", {}).get("symbol", "Unknown")),
+                                "symbol": content.get("metadata", {}).get("symbol", "Unknown"),
                                 "name": content.get("metadata", {}).get("name", "Unknown"),
                                 "supply": token_info.get("supply"),
                                 "decimals": token_info.get("decimals", 9)
