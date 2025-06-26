@@ -69,6 +69,7 @@ class PriceService:
                 return cache_entry["data"]
             
             # Make API call to get complete metadata using getAsset
+            logger.info(f"Making getAsset API call for new token {token_address[:8]}...")
             payload = {
                 "jsonrpc": "2.0",
                 "id": "1",
@@ -81,12 +82,18 @@ class PriceService:
                 }
             }
             
+            logger.debug(f"API URL: {self.helius_rpc_url}")
+            logger.debug(f"Payload: {payload}")
+            
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     self.helius_rpc_url,
                     json=payload,
-                    headers={"Content-Type": "application/json"}
+                    headers={"Content-Type": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
+                    logger.info(f"getAsset API response status: {response.status} for {token_address[:8]}...")
+                    
                     if response.status == 200:
                         data = await response.json()
                         logger.info(f"getAsset response for {token_address[:8]}...: {data}")
@@ -103,12 +110,14 @@ class PriceService:
                                 "decimals": token_info.get("decimals", 9)
                             }
                             
+                            logger.info(f"Parsed metadata: symbol={metadata['symbol']}, supply={metadata['supply']}, decimals={metadata['decimals']}")
+                            
                             # Cache with access tracking (metadata never changes but we cleanup stale entries)
                             self.token_metadata_cache[token_address] = {
                                 "data": metadata,
                                 "last_access": datetime.now()
                             }
-                            logger.info(f"Cached metadata for {token_address[:8]}...: symbol={metadata['symbol']}, supply={metadata['supply']}")
+                            logger.info(f"Successfully cached metadata for {token_address[:8]}...: symbol={metadata['symbol']}, supply={metadata['supply']}")
                             
                             # Trigger cleanup occasionally (every 100th cache addition)
                             if len(self.token_metadata_cache) % 100 == 0:
@@ -116,10 +125,11 @@ class PriceService:
                             
                             return metadata
                         else:
-                            logger.warning(f"No metadata found for token {token_address}")
+                            logger.warning(f"No result data in response for token {token_address}: {data}")
                             return None
                     else:
-                        logger.error(f"getAsset API error: {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"getAsset API error {response.status} for {token_address[:8]}...: {error_text}")
                         return None
                         
         except Exception as e:
