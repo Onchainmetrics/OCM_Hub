@@ -24,8 +24,9 @@ class TelegramBot:
             BotCommand("heatmap", "Track alpha wallet flows [elite|all]"),
             BotCommand("scan", "Scan a token for current alpha holders"),
             BotCommand("flows", "View top token inflows/outflows"),
-            BotCommand("testalpha", "Test alpha tracker functionality"),
-            BotCommand("testconfluence", "Test confluence detection")
+            BotCommand("track", "Track a token for alpha activity (48h auto-expire)"),
+            BotCommand("clear", "Remove tracked tokens"),
+            BotCommand("status", "Show tracked tokens")
         ]
         
         # Register command handlers

@@ -9,6 +9,7 @@ import aiohttp
 import os
 from dotenv import load_dotenv
 from src.services.price_service import PriceService
+from src.services.cache_service import CacheService
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ class AlphaTracker:
         self.telegram_bot = None  # Will be set from main bot instance
         self.price_service = PriceService()
         self.rate_limiter = TelegramRateLimiter()
+        self.cache = CacheService()
         
         # Insider Cluster - Track these specific wallets for every swap
         self.insider_cluster = {
@@ -169,7 +171,7 @@ class AlphaTracker:
             
             update_data = {
                 "webhookURL": self.WEBHOOK_URL,
-                "transactionTypes": ["SWAP"],
+                "transactionTypes": ["SWAP", "TRANSFER"],
                 "accountAddresses": addresses,
                 "webhookType": "enhanced"
             }
@@ -221,7 +223,10 @@ class AlphaTracker:
                 if not wallet_address or wallet_address not in self.alpha_addresses:
                     continue
                     
-                # Process token transfers to identify swaps
+                # Detect transaction type from Helius webhook data
+                tx_type = tx_data.get('type', 'UNKNOWN')
+                
+                # Process token transfers
                 for transfer in token_transfers:
                     token_address = transfer.get('mint')
                     if not token_address:
@@ -235,11 +240,19 @@ class AlphaTracker:
                     to_user = transfer.get('toUserAccount')
                     token_amount = transfer.get('tokenAmount', 0)
                     
-                    # Determine if this is a buy or sell
+                    # Determine transaction direction
                     is_buy = to_user == wallet_address
                     is_sell = from_user == wallet_address
+                    is_transfer_in = to_user == wallet_address and tx_type == 'TRANSFER'
+                    is_transfer_out = from_user == wallet_address and tx_type == 'TRANSFER'
                     
-                    if not (is_buy or is_sell):
+                    # For TRANSFER transactions, handle tracked tokens separately
+                    if tx_type == 'TRANSFER' and (is_transfer_in or is_transfer_out):
+                        await self.handle_tracked_transfer(wallet_address, token_address, transfer, is_transfer_in)
+                        continue
+                    
+                    # For SWAP transactions, continue with existing logic
+                    if tx_type != 'SWAP' or not (is_buy or is_sell):
                         continue
                         
                     # Calculate SOL equivalent from native transfers - DIRECTION MATTERS!
@@ -424,13 +437,25 @@ class AlphaTracker:
                 cluster_label = self.insider_cluster[wallet]
                 logger.info(f"🚨 INSIDER CLUSTER DETECTED: {cluster_label} - {wallet[:8]}... - {swap_data['token_symbol']} {'BUY' if swap_data['is_buy'] else 'SELL'}")
                 
-                try:
-                    # Create special insider cluster notification
-                    insider_message = await self.format_insider_cluster_notification(swap_data, cluster_label)
-                    await self.send_to_telegram(insider_message)
-                    logger.info(f"Insider cluster notification sent for {cluster_label}")
-                except Exception as e:
-                    logger.error(f"CRITICAL: Failed to send insider cluster notification for {cluster_label}: {e}")
+                # Apply market cap threshold ONLY for BUY signals (not SELL signals)
+                should_notify = True
+                if swap_data['is_buy']:
+                    current_market_cap = swap_data.get('current_market_cap', 0)
+                    if current_market_cap < 100_000:  # 100K threshold for BUY signals only
+                        should_notify = False
+                        logger.info(f"Insider BUY signal filtered: {cluster_label} - MCap ${current_market_cap:,.0f} below $100K threshold")
+                
+                if should_notify:
+                    try:
+                        # Create special insider cluster notification
+                        insider_message = await self.format_insider_cluster_notification(swap_data, cluster_label)
+                        await self.send_to_telegram(insider_message)
+                        logger.info(f"Insider cluster notification sent for {cluster_label}")
+                    except Exception as e:
+                        logger.error(f"CRITICAL: Failed to send insider cluster notification for {cluster_label}: {e}")
+            
+            # Check for tracked tokens - individual alpha activity notifications
+            await self.check_tracked_token_activity(swap_data)
             
             # Check for confluence patterns - this is our PRIMARY PURPOSE
             patterns = await self.pattern_detector.add_transaction(swap_data)
@@ -529,6 +554,127 @@ class AlphaTracker:
                 # Don't retry timeouts to avoid backlog
             else:
                 logger.error(f"Error sending Telegram notification: {e}")
+
+    async def handle_tracked_transfer(self, wallet_address: str, token_address: str, transfer: dict, is_incoming: bool):
+        """Handle TRANSFER transactions for tracked tokens only"""
+        try:
+            # Check if this token is being tracked
+            tracked_tokens = await self.cache.get("tracked_tokens") or []
+            if token_address not in tracked_tokens:
+                return
+                
+            # Get token metadata for the notification
+            metadata = await self.price_service.get_token_metadata(token_address)
+            token_symbol = metadata.get('symbol', 'Unknown') if metadata else 'Unknown'
+            
+            # Get trader info
+            trader_profile = self.trader_profiles.get(wallet_address, {})
+            trader_category = trader_profile.get('category', 'Unknown')
+            
+            # Only notify for alpha traders
+            alpha_trader_types = ['Insider', 'Alpha Trader', 'Volume Leader', 'Consistent Performer']
+            if trader_category not in alpha_trader_types:
+                return
+                
+            token_amount = transfer.get('tokenAmount', 0)
+            
+            # Format transfer notification
+            direction = "RECEIVED" if is_incoming else "SENT"
+            direction_emoji = "📥" if is_incoming else "📤"
+            
+            message = (
+                f"🎯 <b>TRACKED TOKEN TRANSFER</b> {direction_emoji}\n\n"
+                f"🪙 <b>{token_symbol}</b>\n"
+                f"📜 <code>{token_address}</code>\n\n"
+                f"<b>Transfer Details:</b>\n"
+                f"   👤 Trader: {trader_category}\n"
+                f"   📊 Amount: {token_amount:,.0f} {token_symbol}\n"
+                f"   🔄 Action: {direction}\n\n"
+                f"<b>Wallet:</b>\n"
+                f"   🔗 <a href='https://www.gmgn.ai/sol/address/{wallet_address}'>{wallet_address[:6]}...{wallet_address[-4:]}</a>\n\n"
+                f"<b>Links:</b>\n"
+                f"GMGN: https://gmgn.ai/sol/token/{token_address}"
+            )
+            
+            # Send notification with rate limiting (1 per token per minute)
+            cache_key = f"transfer_notify:{token_address}"
+            if not await self.cache.get(cache_key):
+                await self.send_to_telegram(message)
+                await self.cache.set(cache_key, "sent", expire_minutes=1)
+                logger.info(f"Sent tracked transfer notification for {token_symbol} ({wallet_address[:8]}...)")
+            else:
+                logger.info(f"Transfer notification rate limited for {token_symbol}")
+                
+        except Exception as e:
+            logger.error(f"Error handling tracked transfer: {e}")
+    
+    async def check_tracked_token_activity(self, swap_data: dict):
+        """Check if swap involves a tracked token and send notification"""
+        try:
+            # Check if this token is being tracked
+            token_address = swap_data['token_address']
+            tracked_tokens = await self.cache.get("tracked_tokens") or []
+            if token_address not in tracked_tokens:
+                return
+                
+            # Get trader info
+            wallet_address = swap_data['wallet_address']
+            trader_profile = self.trader_profiles.get(wallet_address, {})
+            trader_category = trader_profile.get('category', 'Unknown')
+            
+            # Only notify for alpha traders
+            alpha_trader_types = ['Insider', 'Alpha Trader', 'Volume Leader', 'Consistent Performer']
+            if trader_category not in alpha_trader_types:
+                return
+            
+            # Apply minimum transaction threshold ($500)
+            usd_value = swap_data.get('usd_value', 0)
+            if usd_value < 500:
+                logger.info(f"Tracked token activity below $500 threshold: ${usd_value}")
+                return
+                
+            token_symbol = swap_data.get('token_symbol', 'Unknown')
+            is_buy = swap_data.get('is_buy', False)
+            current_market_cap = swap_data.get('current_market_cap', 0)
+            
+            # Format market cap
+            if current_market_cap >= 1_000_000_000:
+                mcap_str = f"${current_market_cap/1_000_000_000:.2f}B"
+            elif current_market_cap >= 1_000_000:
+                mcap_str = f"${current_market_cap/1_000_000:.1f}M"
+            elif current_market_cap >= 1_000:
+                mcap_str = f"${current_market_cap/1_000:.0f}K"
+            else:
+                mcap_str = f"${current_market_cap:.0f}"
+            
+            action = "BUYING" if is_buy else "SELLING"
+            action_emoji = "🟢" if is_buy else "🔴"
+            
+            message = (
+                f"🎯 <b>TRACKED TOKEN ALERT</b> {action_emoji}\n\n"
+                f"🪙 <b>{token_symbol}</b> | MCap: {mcap_str}\n"
+                f"📜 <code>{token_address}</code>\n\n"
+                f"<b>Transaction:</b>\n"
+                f"   👤 {trader_category} {action}\n"
+                f"   💰 Amount: ${usd_value:,.0f}\n\n"
+                f"<b>Wallet:</b>\n"
+                f"   🔗 <a href='https://www.gmgn.ai/sol/address/{wallet_address}'>{wallet_address[:6]}...{wallet_address[-4:]}</a>\n\n"
+                f"<b>Links:</b>\n"
+                f"GMGN: https://gmgn.ai/sol/token/{token_address}\n"
+                f"Birdeye: https://birdeye.so/token/{token_address}?chain=solana"
+            )
+            
+            # Send notification with rate limiting (1 per token per minute)
+            cache_key = f"track_notify:{token_address}"
+            if not await self.cache.get(cache_key):
+                await self.send_to_telegram(message)
+                await self.cache.set(cache_key, "sent", expire_minutes=1)
+                logger.info(f"Sent tracked token notification for {token_symbol} ({wallet_address[:8]}...)")
+            else:
+                logger.info(f"Tracked token notification rate limited for {token_symbol}")
+                
+        except Exception as e:
+            logger.error(f"Error checking tracked token activity: {e}")
 
     async def format_confluence_notification(self, trigger_tx: dict, patterns: list, 
                                            recent_txs: list) -> str:

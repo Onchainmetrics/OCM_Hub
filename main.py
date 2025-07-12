@@ -39,6 +39,7 @@ async def main():
         alpha_tracker = AlphaTracker(dune.client)
         alpha_tracker.telegram_bot = bot.application.bot  # Set bot for notifications
         bot.application.alpha_tracker = alpha_tracker
+        bot.application.cache_service = alpha_tracker.cache  # Make cache accessible to commands
         
         # Initial fetch of alpha addresses
         logger.info("Performing initial fetch of alpha addresses...")

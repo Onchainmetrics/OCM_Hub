@@ -250,27 +250,45 @@ class PatternDetector:
             if tx['trader_type'] in alpha_trader_types:
                 logger.info(f"  {tx['action'].upper()}: ${tx['amount_usd']:,.0f} by {tx['wallet'][:8]}... ({tx['trader_type']})")
         
-        # Check for confluence with minimum $2999 net flow
-        if abs(net_flow) >= 2999:
-            if net_flow > 0 and len(alpha_buyers) >= 2:
+        # STRICTER CONFLUENCE THRESHOLDS to reduce noise by 80%:
+        # 1. Market cap relative thresholds (smart scaling)
+        # 2. Increased wallet requirements (3+ instead of 2+)
+        
+        # Calculate market cap relative threshold
+        market_cap = recent_txs[0].get('market_cap', 0) if recent_txs else 0
+        
+        if market_cap > 0:
+            if market_cap < 1_000_000:  # Under $1M mcap
+                min_flow_threshold = max(2000, market_cap * 0.025)  # 2.5% of mcap, min $2K
+            elif market_cap < 10_000_000:  # $1M-$10M mcap  
+                min_flow_threshold = max(5000, market_cap * 0.015)  # 1.5% of mcap, min $5K
+            else:  # Over $10M mcap
+                min_flow_threshold = max(10000, market_cap * 0.008)  # 0.8% of mcap, min $10K
+        else:
+            min_flow_threshold = 5000  # Fallback if no market cap data
+            
+        logger.info(f"Confluence threshold for {token_symbol} (MCap: ${market_cap:,.0f}): ${min_flow_threshold:,.0f}")
+        
+        if abs(net_flow) >= min_flow_threshold:
+            if net_flow > 0 and len(alpha_buyers) >= 3:
                 # Net buying with multiple buyers
                 wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_buyers)[:3]]
                 logger.info(f"✅ BUY CONFLUENCE TRIGGERED for {token_symbol}: {len(alpha_buyers)} buyers, net: ${net_flow:,.0f}")
                 return f"🔥 {len(alpha_buyers)} Alpha wallets NET BUYING ${token_symbol} (${net_flow:,.0f} net)\n   Wallets: {', '.join(wallet_previews)}"
-            elif net_flow < 0 and len(alpha_sellers) >= 2:
-                # Net selling with multiple sellers  
+            elif net_flow < 0 and len(alpha_sellers) >= 3:
+                # Net selling with multiple sellers - STRICTER: 3+ sellers required
                 wallet_previews = [f"{w[:4]}...{w[-4:]}" for w in list(alpha_sellers)[:3]]
                 logger.info(f"✅ SELL CONFLUENCE TRIGGERED for {token_symbol}: {len(alpha_sellers)} sellers, net: ${abs(net_flow):,.0f}")
                 return f"🚨 {len(alpha_sellers)} Alpha wallets NET SELLING ${token_symbol} (${abs(net_flow):,.0f} net)\n   Wallets: {', '.join(wallet_previews)}"
             elif net_flow > 0:
-                logger.warning(f"❌ BUY confluence FAILED for {token_symbol}: net_flow=${net_flow:,.0f} ✅ but only {len(alpha_buyers)} buyers (need 2+)")
+                logger.warning(f"❌ BUY confluence FAILED for {token_symbol}: net_flow=${net_flow:,.0f} ✅ but only {len(alpha_buyers)} buyers (need 3+)")
             elif net_flow < 0:
-                logger.warning(f"❌ SELL confluence FAILED for {token_symbol}: net_flow=${abs(net_flow):,.0f} ✅ but only {len(alpha_sellers)} sellers (need 2+)")
+                logger.warning(f"❌ SELL confluence FAILED for {token_symbol}: net_flow=${abs(net_flow):,.0f} ✅ but only {len(alpha_sellers)} sellers (need 3+)")
         else:
             if net_flow > 0:
-                logger.info(f"❌ BUY confluence FAILED for {token_symbol}: net_flow=${net_flow:,.0f} below $2999 threshold (has {len(alpha_buyers)} buyers)")
+                logger.info(f"❌ BUY confluence FAILED for {token_symbol}: net_flow=${net_flow:,.0f} below ${min_flow_threshold:,.0f} threshold (has {len(alpha_buyers)} buyers)")
             elif net_flow < 0:
-                logger.info(f"❌ SELL confluence FAILED for {token_symbol}: net_flow=${abs(net_flow):,.0f} below $2999 threshold (has {len(alpha_sellers)} sellers)")
+                logger.info(f"❌ SELL confluence FAILED for {token_symbol}: net_flow=${abs(net_flow):,.0f} below ${min_flow_threshold:,.0f} threshold (has {len(alpha_sellers)} sellers)")
             else:
                 logger.info(f"❌ No confluence for {token_symbol}: zero net flow")
             

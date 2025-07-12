@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler
 from src.services.cache_service import cache_command
 from functools import wraps
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -233,143 +233,7 @@ async def _heatmap_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = "Mode: All Traders\n\n" + message
     return message
 
-async def test_alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Test alpha tracker functionality"""
-    if not await check_auth(update):
-        return
         
-    try:
-        await update.message.reply_text("🔄 Testing alpha tracker...")
-        await context.application.alpha_tracker.update_alpha_addresses()
-        num_addresses = len(context.application.alpha_tracker.alpha_addresses)
-        await update.message.reply_text(f"✅ Successfully loaded {num_addresses} alpha addresses")
-    except Exception as e:
-        logger.error(f"Error testing alpha tracker: {e}")
-        await update.message.reply_text("❌ Error testing alpha tracker")
-        
-async def test_confluence_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Test confluence detection with simulated transactions"""
-    if not await check_auth(update):
-        return
-        
-    try:
-        await update.message.reply_text("🧪 Testing confluence detection...")
-        
-        # Get alpha tracker
-        alpha_tracker = context.application.alpha_tracker
-        if not alpha_tracker.pattern_detector:
-            from src.services.pattern_detector import PatternDetector
-            dune = DuneAnalytics()
-            alpha_tracker.pattern_detector = PatternDetector(alpha_tracker.trader_profiles, dune.client)
-        
-        # Simulate test token and transactions
-        test_token = "JBahfY5TSFaBooJ5N186Zd9JNvVgm9iHRJSUFT5KqNxA"  # RICO from your example
-        test_wallets = [
-            "DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm",
-            "2xJ8K9pQw3mVnEsZ1H4R6YtN7bF8sX5qW1nM3pL9cR4k",
-            "8nP2Q7rY5tK9mL3xW6vZ1hF4jD8sC2qE9nR7bM5tX1pL"
-        ]
-        
-        # Simulate multiple alpha traders selling the same token
-        await update.message.reply_text("Simulating alpha traders selling same token...")
-        
-        for i, wallet in enumerate(test_wallets[:2]):  # First 2 wallets
-            test_tx = {
-                'wallet_address': wallet,
-                'token_address': test_token,
-                'token_symbol': 'RICO',
-                'is_buy': False,  # SELL
-                'sol_amount': 5.0 + i,
-                'token_amount': 100000 + (i * 10000),
-                'usd_value': 800 + (i * 100),
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            # Add to trader profiles as Alpha Trader (new structure)
-            alpha_tracker.trader_profiles[wallet] = {
-                'category': 'Alpha Trader',
-                'win_rate': 85.0,
-                'trades_per_day': 5.0,
-                'total_profits': 150000,
-                'unique_tokens': 15,
-                'total_trades': 50,
-                'spike_tokens_traded': 3,
-                'massive_wins': 2,
-                'avg_spike_ratio': 12.5,
-                'last_trade': datetime.now().isoformat()
-            }
-            
-            patterns = await alpha_tracker.pattern_detector.add_transaction(test_tx)
-            
-            if patterns:
-                # Use the real confluence notification format
-                try:
-                    # Add market cap for testing
-                    test_tx['current_market_cap'] = 4_450_000  # $4.45M like in your example
-                    
-                    # Get recent transactions for this token
-                    recent_txs = await alpha_tracker.pattern_detector._get_recent_transactions(test_token)
-                    
-                    
-                    # Use the full confluence notification format (no cost basis)
-                    message = await alpha_tracker.format_confluence_notification(
-                        test_tx, patterns, recent_txs
-                    )
-                    
-                    await update.message.reply_text(message, parse_mode='HTML')
-                    break
-                    
-                except Exception as e:
-                    logger.error(f"Error formatting full confluence notification: {e}")
-                    # Fallback to basic message
-                    message = f"🚨 CONFLUENCE DETECTED!\n\n" + "\n".join(patterns)
-                    await update.message.reply_text(message, parse_mode='HTML')
-                    break
-        else:
-            # Try one more to trigger confluence
-            test_tx = {
-                'wallet_address': test_wallets[2],
-                'token_address': test_token,
-                'token_symbol': 'RICO',
-                'is_buy': False,
-                'sol_amount': 7.0,
-                'token_amount': 120000,
-                'usd_value': 1000,
-                'timestamp': datetime.now().isoformat()
-            }
-            alpha_tracker.trader_profiles[test_wallets[2]] = {
-                'category': 'Insider',
-                'win_rate': 90.0,
-                'trades_per_day': 8.0,
-                'total_profits': 200000,
-                'unique_tokens': 12,
-                'total_trades': 80,
-                'spike_tokens_traded': 5,
-                'massive_wins': 4,
-                'avg_spike_ratio': 15.2,
-                'last_trade': datetime.now().isoformat()
-            }
-            patterns = await alpha_tracker.pattern_detector.add_transaction(test_tx)
-            
-            if patterns:
-                # Use the real confluence notification format for final test too
-                try:
-                    test_tx['current_market_cap'] = 4_450_000  # $4.45M
-                    recent_txs = await alpha_tracker.pattern_detector._get_recent_transactions(test_token)
-                    message = await alpha_tracker.format_confluence_notification(
-                        test_tx, patterns, recent_txs
-                    )
-                    await update.message.reply_text(message, parse_mode='HTML')
-                except Exception as e:
-                    logger.error(f"Error in final confluence test: {e}")
-                    message = f"🚨 CONFLUENCE DETECTED!\n\n" + "\n".join(patterns)
-                    await update.message.reply_text(message, parse_mode='HTML')
-            else:
-                await update.message.reply_text("🔍 No confluence detected in test")
-                
-    except Exception as e:
-        logger.error(f"Error testing confluence: {e}")
-        await update.message.reply_text(f"❌ Error testing confluence: {str(e)}")
 
 # Primary flow thresholds
 FLOW_THRESHOLDS = {
@@ -701,9 +565,10 @@ welcome_message = (
     "/heatmap [all|elite] - View live alpha wallet activity (default: all)\n"
     "/scan <contract_address> - Scan a token for current alpha holders\n"
     "/flows [hours] [top_n] - View top token inflows/outflows (default: 24h, top 15)\n"
-    "/help - Show this help message\n"
-    "/testalpha - Test alpha tracker functionality\n"
-    "/testconfluence - Test confluence detection with simulated data"
+    "/track <contract_address> - Track token for alpha activity (48h auto-expire)\n"
+    "/clear <address|all> - Remove tracked tokens\n"
+    "/status - Show tracked tokens\n"
+    "/help - Show this help message"
 )
 
 help_text = (
@@ -719,11 +584,166 @@ help_text = (
     "/flows [hours_interval] [top_n]\n"
     "- View top token inflows/outflows for the last N hours (default: 24h, top 15)\n"
     "- Example: /flows 12 20 (shows top 20 tokens for last 12h)\n\n"
-    "/testalpha\n"
-    "- Test alpha tracker functionality\n\n"
-    "/testconfluence\n"
-    "- Test confluence detection with simulated data\n\n"
+    "/track <contract_address>\n"
+    "- Track a token for alpha activity (48h auto-expire)\n\n"
+    "/clear <contract_address|all>\n"
+    "- Remove specific token or all tracked tokens\n\n"
+    "/status\n"
+    "- Show all currently tracked tokens\n\n"
     "/help\n"
     "- Show this help message"
 )
+
+# Global token tracking commands
+async def track_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Track a token for alpha activity notifications"""
+    if not await check_auth(update):
+        return
+        
+    if not context.args:
+        await update.message.reply_text("Please provide a contract address.\nUsage: /track <contract_address>")
+        return
+        
+    contract_address = context.args[0].strip()
+    
+    try:
+        # Get cache service from application context
+        cache_service = context.application.cache_service
+        
+        # Validate contract address format (basic validation)
+        if len(contract_address) < 32 or len(contract_address) > 44:
+            await update.message.reply_text("❌ Invalid contract address format")
+            return
+            
+        # Check if already tracking
+        tracked_tokens = await cache_service.get("tracked_tokens") or set()
+        if isinstance(tracked_tokens, list):
+            tracked_tokens = set(tracked_tokens)
+            
+        if contract_address in tracked_tokens:
+            await update.message.reply_text(f"✅ Token <code>{contract_address}</code> is already being tracked", parse_mode='HTML')
+            return
+            
+        # Add to tracking with 48h expiration
+        tracked_tokens.add(contract_address)
+        await cache_service.set("tracked_tokens", list(tracked_tokens), expire_minutes=48*60)
+        
+        # Store token metadata with expiration timestamp
+        expiry_time = datetime.now() + timedelta(hours=48)
+        await cache_service.set(f"track_metadata:{contract_address}", {
+            "added_at": datetime.now().isoformat(),
+            "expires_at": expiry_time.isoformat(),
+            "added_by": update.effective_user.username or str(update.effective_user.id)
+        }, expire_minutes=48*60)
+        
+        await update.message.reply_text(
+            f"🎯 <b>Now tracking token:</b>\n"
+            f"📜 <code>{contract_address}</code>\n\n"
+            f"⏰ Auto-expires: {expiry_time.strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"📢 You'll get notifications for any alpha activity on this token",
+            parse_mode='HTML'
+        )
+        
+        logger.info(f"Added token {contract_address[:8]}... to tracking list")
+        
+    except Exception as e:
+        logger.error(f"Error tracking token: {e}")
+        await update.message.reply_text("❌ Error tracking token. Please try again.")
+
+async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clear tracked tokens"""
+    if not await check_auth(update):
+        return
+        
+    if not context.args:
+        await update.message.reply_text("Usage: /clear <contract_address> or /clear all")
+        return
+        
+    target = context.args[0].strip().lower()
+    
+    try:
+        cache_service = context.application.cache_service
+        tracked_tokens = await cache_service.get("tracked_tokens") or set()
+        if isinstance(tracked_tokens, list):
+            tracked_tokens = set(tracked_tokens)
+            
+        if target == "all":
+            # Clear all tracked tokens
+            if not tracked_tokens:
+                await update.message.reply_text("📭 No tokens are currently being tracked")
+                return
+                
+            count = len(tracked_tokens)
+            # Clear the main list
+            await cache_service.delete("tracked_tokens")
+            
+            # Clear individual metadata
+            for token in tracked_tokens:
+                await cache_service.delete(f"track_metadata:{token}")
+                
+            await update.message.reply_text(f"🗑️ Cleared all {count} tracked tokens")
+            logger.info(f"Cleared all {count} tracked tokens")
+            
+        else:
+            # Clear specific token
+            contract_address = target
+            if contract_address not in tracked_tokens:
+                await update.message.reply_text(f"❌ Token <code>{contract_address}</code> is not being tracked", parse_mode='HTML')
+                return
+                
+            tracked_tokens.remove(contract_address)
+            await cache_service.set("tracked_tokens", list(tracked_tokens), expire_minutes=48*60)
+            await cache_service.delete(f"track_metadata:{contract_address}")
+            
+            await update.message.reply_text(f"🗑️ Stopped tracking <code>{contract_address}</code>", parse_mode='HTML')
+            logger.info(f"Removed token {contract_address[:8]}... from tracking list")
+            
+    except Exception as e:
+        logger.error(f"Error clearing tokens: {e}")
+        await update.message.reply_text("❌ Error clearing tokens. Please try again.")
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show status of tracked tokens"""
+    if not await check_auth(update):
+        return
+        
+    try:
+        cache_service = context.application.cache_service
+        tracked_tokens = await cache_service.get("tracked_tokens") or []
+        
+        if not tracked_tokens:
+            await update.message.reply_text("📭 No tokens are currently being tracked\n\nUse /track <contract_address> to start tracking")
+            return
+            
+        message_lines = ["🎯 <b>Currently Tracked Tokens:</b>\n"]
+        
+        for i, token in enumerate(tracked_tokens, 1):
+            # Get metadata if available
+            metadata = await cache_service.get(f"track_metadata:{token}")
+            
+            if metadata:
+                expires_at = datetime.fromisoformat(metadata.get("expires_at"))
+                time_left = expires_at - datetime.now()
+                hours_left = max(0, int(time_left.total_seconds() / 3600))
+                
+                message_lines.append(f"{i}. <code>{token}</code>")
+                message_lines.append(f"   ⏰ Expires in {hours_left}h")
+                if metadata.get("added_by"):
+                    message_lines.append(f"   👤 Added by: {metadata['added_by']}")
+                message_lines.append("")
+            else:
+                message_lines.append(f"{i}. <code>{token}</code>")
+                message_lines.append("   ⏰ Expires in <48h")
+                message_lines.append("")
+                
+        message_lines.append(f"📊 Total: {len(tracked_tokens)} tokens")
+        message_lines.append("\n💡 Use /clear <address> to remove specific tokens")
+        message_lines.append("💡 Use /clear all to remove all tokens")
+        
+        message = "\n".join(message_lines)
+        await update.message.reply_text(message, parse_mode='HTML')
+        
+    except Exception as e:
+        logger.error(f"Error getting status: {e}")
+        await update.message.reply_text("❌ Error getting tracking status. Please try again.")
 
