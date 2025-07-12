@@ -259,11 +259,11 @@ class PatternDetector:
         
         if market_cap > 0:
             if market_cap < 1_000_000:  # Under $1M mcap
-                min_flow_threshold = max(2000, market_cap * 0.025)  # 2.5% of mcap, min $2K
+                min_flow_threshold = max(2000, market_cap * 0.01)  # 1% of mcap, min $2K
             elif market_cap < 10_000_000:  # $1M-$10M mcap  
-                min_flow_threshold = max(5000, market_cap * 0.015)  # 1.5% of mcap, min $5K
+                min_flow_threshold = max(5000, market_cap * 0.005)  # 0.5% of mcap, min $5K
             else:  # Over $10M mcap
-                min_flow_threshold = max(10000, market_cap * 0.008)  # 0.8% of mcap, min $10K
+                min_flow_threshold = max(10000, market_cap * 0.003)  # 0.3% of mcap, min $10K
         else:
             min_flow_threshold = 5000  # Fallback if no market cap data
             
