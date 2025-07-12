@@ -733,11 +733,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 message_lines.append("")
             else:
                 message_lines.append(f"{i}. <code>{token}</code>")
-                message_lines.append("   ⏰ Expires in <48h")
+                message_lines.append("   ⏰ Expires in &lt;48h")
                 message_lines.append("")
                 
         message_lines.append(f"📊 Total: {len(tracked_tokens)} tokens")
-        message_lines.append("\n💡 Use /clear <address> to remove specific tokens")
+        message_lines.append("\n💡 Use /clear &lt;address&gt; to remove specific tokens")
         message_lines.append("💡 Use /clear all to remove all tokens")
         
         message = "\n".join(message_lines)
@@ -746,4 +746,24 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error getting status: {e}")
         await update.message.reply_text("❌ Error getting tracking status. Please try again.")
+
+async def force_webhook_update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Force update webhook to include TRANSFER transactions (admin only)"""
+    if not await check_auth(update):
+        return
+        
+    try:
+        alpha_tracker = context.application.alpha_tracker
+        await update.message.reply_text("🔄 Force updating webhook to include TRANSFER transactions...")
+        
+        # Force update webhook with current addresses
+        current_addresses = list(alpha_tracker.alpha_addresses)
+        await alpha_tracker.update_webhook(current_addresses)
+        
+        await update.message.reply_text("✅ Webhook updated successfully! TRANSFER transactions are now enabled.")
+        logger.info("Force updated webhook to include TRANSFER transactions")
+        
+    except Exception as e:
+        logger.error(f"Error force updating webhook: {e}")
+        await update.message.reply_text("❌ Error updating webhook. Please try again.")
 

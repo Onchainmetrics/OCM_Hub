@@ -9,7 +9,8 @@ from src.bot.commands import (
     flows_command,
     track_command,
     clear_command,
-    status_command
+    status_command,
+    force_webhook_update_command
 )
 import logging
 
@@ -45,4 +46,5 @@ def register_handlers(application):
     application.add_handler(CommandHandler('flows', flows_command))
     application.add_handler(CommandHandler('track', track_command))
     application.add_handler(CommandHandler('clear', clear_command))
-    application.add_handler(CommandHandler('status', status_command)) 
+    application.add_handler(CommandHandler('status', status_command))
+    application.add_handler(CommandHandler('updatewebhook', force_webhook_update_command)) 
