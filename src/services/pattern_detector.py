@@ -329,9 +329,28 @@ class PatternDetector:
             
             unique_followers = set(tx['wallet'] for tx in subsequent_actions)
             if len(unique_followers) >= 2:
-                action_verb = 'buying' if alpha_action_type == 'buy' else 'selling'
-                follower_types = set(tx['trader_type'] for tx in subsequent_actions)
-                return f"👥 Alpha {action_verb} ${token_symbol} → {len(unique_followers)} followers\n   Types: {', '.join(follower_types)}"
+                # Apply same market cap threshold as confluence detection
+                market_cap = recent_txs[0].get('market_cap', 0) if recent_txs else 0
+                
+                if market_cap > 0:
+                    if market_cap < 1_000_000:  # Under $1M mcap
+                        min_flow_threshold = max(2000, market_cap * 0.01)
+                    elif market_cap < 10_000_000:  # $1M-$10M mcap  
+                        min_flow_threshold = max(5000, market_cap * 0.005)
+                    else:  # Over $10M mcap
+                        min_flow_threshold = max(10000, market_cap * 0.003)
+                else:
+                    min_flow_threshold = 5000
+                
+                # Calculate total volume for this sequence pattern
+                total_volume = sum(tx.get('amount_usd', 0) for tx in subsequent_actions)
+                
+                if total_volume >= min_flow_threshold:
+                    action_verb = 'buying' if alpha_action_type == 'buy' else 'selling'
+                    follower_types = set(tx['trader_type'] for tx in subsequent_actions)
+                    return f"👥 Alpha {action_verb} ${token_symbol} → {len(unique_followers)} followers\n   Types: {', '.join(follower_types)}"
+                else:
+                    logger.info(f"❌ Sequence pattern FAILED for {token_symbol}: volume=${total_volume:,.0f} below ${min_flow_threshold:,.0f} threshold")
                 
         return None
         
@@ -350,16 +369,37 @@ class PatternDetector:
         buyer_types = set(tx['trader_type'] for tx in buyers)
         seller_types = set(tx['trader_type'] for tx in sellers)
         
+        # Apply same market cap threshold as confluence detection
+        market_cap = recent_txs[0].get('market_cap', 0) if recent_txs else 0
+        
+        if market_cap > 0:
+            if market_cap < 1_000_000:  # Under $1M mcap
+                min_flow_threshold = max(2000, market_cap * 0.01)
+            elif market_cap < 10_000_000:  # $1M-$10M mcap  
+                min_flow_threshold = max(5000, market_cap * 0.005)
+            else:  # Over $10M mcap
+                min_flow_threshold = max(10000, market_cap * 0.003)
+        else:
+            min_flow_threshold = 5000
+        
         # Check for diverse buying on same token
         if len(buyer_types) >= 3:
             total_buy_volume = sum(tx['amount_usd'] for tx in buyers)
             unique_buyers = len(set(tx['wallet'] for tx in buyers))
-            return f"🎆 {len(buyer_types)} trader types buying ${token_symbol}\n   {unique_buyers} wallets, ${total_buy_volume:,.0f} volume"
+            
+            if total_buy_volume >= min_flow_threshold:
+                return f"🎆 {len(buyer_types)} trader types buying ${token_symbol}\n   {unique_buyers} wallets, ${total_buy_volume:,.0f} volume"
+            else:
+                logger.info(f"❌ Diversity BUY pattern FAILED for {token_symbol}: volume=${total_buy_volume:,.0f} below ${min_flow_threshold:,.0f} threshold")
             
         # Check for diverse selling on same token
         if len(seller_types) >= 3:
             total_sell_volume = sum(tx['amount_usd'] for tx in sellers)
             unique_sellers = len(set(tx['wallet'] for tx in sellers))
-            return f"📉 {len(seller_types)} trader types selling ${token_symbol}\n   {unique_sellers} wallets, ${total_sell_volume:,.0f} volume"
+            
+            if total_sell_volume >= min_flow_threshold:
+                return f"📉 {len(seller_types)} trader types selling ${token_symbol}\n   {unique_sellers} wallets, ${total_sell_volume:,.0f} volume"
+            else:
+                logger.info(f"❌ Diversity SELL pattern FAILED for {token_symbol}: volume=${total_sell_volume:,.0f} below ${min_flow_threshold:,.0f} threshold")
             
         return None 
