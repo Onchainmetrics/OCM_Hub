@@ -675,11 +675,11 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             count = len(tracked_tokens)
             # Clear the main list
-            await cache_service.delete("tracked_tokens")
+            await cache_service.invalidate("tracked_tokens")
             
             # Clear individual metadata
             for token in tracked_tokens:
-                await cache_service.delete(f"track_metadata:{token}")
+                await cache_service.invalidate(f"track_metadata:{token}")
                 
             await update.message.reply_text(f"🗑️ Cleared all {count} tracked tokens")
             logger.info(f"Cleared all {count} tracked tokens")
@@ -698,7 +698,7 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             tracked_tokens.remove(contract_address)
             await cache_service.set("tracked_tokens", list(tracked_tokens), expire_minutes=48*60)
-            await cache_service.delete(f"track_metadata:{contract_address}")
+            await cache_service.invalidate(f"track_metadata:{contract_address}")
             
             await update.message.reply_text(f"🗑️ Stopped tracking <code>{contract_address}</code>", parse_mode='HTML')
             logger.info(f"Removed token {contract_address[:8]}... from tracking list")
