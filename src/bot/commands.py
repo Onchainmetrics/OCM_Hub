@@ -659,7 +659,7 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /clear <contract_address> or /clear all")
         return
         
-    target = context.args[0].strip().lower()
+    target = context.args[0].strip()
     
     try:
         cache_service = context.application.cache_service
@@ -667,7 +667,7 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if isinstance(tracked_tokens, list):
             tracked_tokens = set(tracked_tokens)
             
-        if target == "all":
+        if target.lower() == "all":
             # Clear all tracked tokens
             if not tracked_tokens:
                 await update.message.reply_text("📭 No tokens are currently being tracked")
@@ -685,10 +685,15 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"Cleared all {count} tracked tokens")
             
         else:
-            # Clear specific token
-            contract_address = target
-            if contract_address not in tracked_tokens:
-                await update.message.reply_text(f"❌ Token <code>{contract_address}</code> is not being tracked", parse_mode='HTML')
+            # Clear specific token - find exact match (case-sensitive)
+            contract_address = None
+            for token in tracked_tokens:
+                if token == target:
+                    contract_address = token
+                    break
+                    
+            if contract_address is None:
+                await update.message.reply_text(f"❌ Token <code>{target}</code> is not being tracked", parse_mode='HTML')
                 return
                 
             tracked_tokens.remove(contract_address)
