@@ -4,6 +4,8 @@
 [![Redis](https://img.shields.io/badge/Redis-6.0+-red.svg)](https://redis.io)
 [![Telegram](https://img.shields.io/badge/Telegram-Bot%20API-blue.svg)](https://core.telegram.org/bots/api)
 
+This Repo was made public temporarily
+
 Advanced cryptocurrency intelligence platform providing real-time alpha detection and on-chain analysis. Built with Python and Redis architecture, enabling interactive commands for token-specific analysis, 24h pattern detection across elite traders, and live confluence monitoring with sub-2ms response times.
 
 ## 🚀 Key Features
