@@ -8,6 +8,30 @@ This Repo was made public temporarily
 
 Advanced cryptocurrency intelligence platform providing real-time alpha detection and on-chain analysis. Built with Python and Redis architecture, enabling interactive commands for token-specific analysis, 24h pattern detection across elite traders, and live confluence monitoring with sub-2ms response times.
 
+## 📋 Requirements
+
+### System Dependencies
+- Python 3.8+
+- Redis 6.0+
+- PostgreSQL (optional, for enhanced logging)
+
+### API Requirements
+- Telegram Bot Token
+- Dune Analytics API Key
+- Helius RPC API Key
+- Redis Cloud (or local Redis server)
+
+### Environment Configuration
+```env
+TELEGRAM_TOKEN=your_telegram_bot_token
+DUNE_API_KEY=your_dune_api_key
+HELIUS_API_KEY=your_helius_api_key
+ALLOWED_USERS=comma_separated_user_ids
+REDIS_HOST=your_redis_host
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
+```
+
 ## 🚀 Key Features
 
 ### Real-Time Intelligence
@@ -77,39 +101,6 @@ Dune Analytics → Custom Endpoints → Statistical Analysis → User Commands
 - **Volume Leaders**: High-frequency trading with 65-85% win rates
 - **Consistent Performers**: Reliable 70-88% win rates with realistic position sizes
 
-## 🔧 Technical Implementation
-
-### Advanced SQL Techniques
-- **Window Functions**: LAG/LEAD operations for price sensitivity analysis
-- **Recursive CTEs**: Complex hierarchical data processing
-- **Percentile Aggregations**: Outlier-resistant market cap calculations
-- **Cross Joins**: Complete address matrices for comprehensive analysis
-
-### Real-Time Processing
-- **Event-Driven Architecture**: Webhook-based transaction monitoring
-- **Concurrent Processing**: Async task handling for multiple transaction streams
-- **Intelligent Rate Limiting**: Smart throttling with exponential backoff
-- **Error Handling**: Comprehensive logging with graceful degradation
-
-### Performance Optimizations
-- **Redis Clustering**: Distributed caching for high availability
-- **Query Optimization**: Materialized views for frequently accessed data
-- **Connection Pooling**: Efficient database resource management
-- **Memory Management**: Optimized data structures for large-scale processing
-
-## 📈 Market Intelligence Capabilities
-
-### Elite Trader Monitoring
-- **Real-time Tracking**: Live monitoring of top-performing cryptocurrency traders
-- **Flow Analysis**: 1h/4h/24h timeframe analysis with USD-denominated calculations
-- **Holder Analysis**: Current position tracking with minimum value thresholds
-- **Market Cap Integration**: Entry price analysis with implied valuation calculations
-
-### Institutional-Grade Features
-- **Supply Evolution**: Historical insider percentage tracking with correlation analysis
-- **Due Diligence**: Comprehensive wallet relationship mapping and classification
-- **Risk Assessment**: Multi-timeframe position analysis with PnL calculations
-- **Compliance Ready**: MEV filtering and suspicious activity detection
 
 ## 🛡️ Security & Reliability
 
@@ -125,29 +116,7 @@ Dune Analytics → Custom Endpoints → Statistical Analysis → User Commands
 - **Audit Logging**: Comprehensive activity tracking for security monitoring
 - **Privacy Protection**: No sensitive data storage in logs or cache
 
-## 📋 Requirements
 
-### System Dependencies
-- Python 3.8+
-- Redis 6.0+
-- PostgreSQL (optional, for enhanced logging)
-
-### API Requirements
-- Telegram Bot Token
-- Dune Analytics API Key
-- Helius RPC API Key
-- Redis Cloud (or local Redis server)
-
-### Environment Configuration
-```env
-TELEGRAM_TOKEN=your_telegram_bot_token
-DUNE_API_KEY=your_dune_api_key
-HELIUS_API_KEY=your_helius_api_key
-ALLOWED_USERS=comma_separated_user_ids
-REDIS_HOST=your_redis_host
-REDIS_PORT=6379
-REDIS_PASSWORD=your_redis_password
-```
 
 ## 🎯 Use Cases
 
